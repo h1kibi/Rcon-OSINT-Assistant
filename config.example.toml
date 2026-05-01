@@ -1,0 +1,112 @@
+[app]
+# 数据刷新间隔 (分钟)
+refresh_interval_minutes = 15
+# SQLite 数据库路径
+database_url = "sqlite:///rcon.db"
+# 是否最小化启动
+start_minimized = false
+
+[proxy]
+# 代理设置 (留空则不使用代理)
+enabled = false
+http_proxy = ""
+https_proxy = ""
+
+[ui]
+# 悬浮球透明度 0.0 ~ 1.0
+floating_ball_opacity = 0.85
+# 悬浮球红点最低分数阈值
+min_score_to_badge = 70
+# 系统通知最低分数阈值
+min_score_to_notify = 80
+# 安静时间段
+quiet_hours_enabled = true
+quiet_hours_start = "23:00"
+quiet_hours_end = "08:00"
+
+[nvd]
+enabled = true
+api_key = ""
+base_url = "https://services.nvd.nist.gov/rest/json/cves/2.0"
+rate_limit_per_minute = 100
+initial_sync_days = 3
+max_records = 5000
+
+[cisa_kev]
+enabled = true
+base_url = "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json"
+
+[epss]
+enabled = true
+base_url = "https://api.first.org/data/v1/epss"
+
+[github_advisory]
+enabled = true
+token = ""
+
+[osv]
+enabled = true
+base_url = "https://api.osv.dev/v1"
+
+[msrc]
+enabled = false
+api_key = ""
+
+[cisco]
+enabled = false
+client_id = ""
+client_secret = ""
+
+[redhat]
+enabled = true
+
+[ubuntu]
+enabled = true
+
+[debian]
+enabled = true
+
+[cnvd]
+enabled = false
+
+[cnnvd]
+enabled = false
+
+[cn_vendor]
+enabled = true
+
+[scoring]
+kev_weight = 35
+epss_95_weight = 20
+epss_85_weight = 12
+cvss_critical_weight = 20
+cvss_high_weight = 12
+recent_24h_weight = 12
+recent_7d_weight = 8
+official_confirmed_weight = 10
+patch_available_weight = 8
+poc_signal_weight = 10
+multi_source_confirmed_weight = 8
+watch_keyword_weight = 15
+
+[watch]
+keywords = ["RCE", "远程代码执行", "auth bypass", "权限提升", "命令执行"]
+vendors = []
+products = []
+
+[logging]
+level = "INFO"
+format = "{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {name}:{function}:{line} | {message}"
+rotation = "10 MB"
+retention = "7 days"
+
+[agent]
+enabled = false
+protocol = "兼容 OpenAI"
+base_url = ""
+api_key = ""
+model = ""
+max_tokens = 2000
+auto_analysis = false
+db_access = true
+prompt = "你是一个专业的网络安全漏洞分析专家。请根据提供的漏洞信息，从以下维度进行分析：\n1. 漏洞危害性评估\n2. 影响范围分析\n3. 利用难度评估\n4. 修复建议\n5. 防御措施建议"
