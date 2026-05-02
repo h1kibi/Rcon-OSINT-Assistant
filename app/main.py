@@ -635,6 +635,7 @@ def _open_ai_push():
             config=get_settings(),
             parent=main_window,
         )
+        main_window._ai_push_window = win
         win.show()
         win.raise_()
         win.activateWindow()

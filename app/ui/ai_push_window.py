@@ -103,6 +103,10 @@ class AIPushWindow(QDialog):
         self.load_push()
 
     def load_push(self):
+        if self._worker and self._worker.isRunning():
+            self.status.setText("AI 正在生成中，请稍候...")
+            return
+
         try:
             from app.services.ai_push_service import (
                 get_ai_push_candidates,
@@ -138,9 +142,15 @@ class AIPushWindow(QDialog):
             self.status.setText(f"加载失败: {type(e).__name__}")
 
     def _start_ai_worker(self, prompt, agent_cfg):
+        if self._worker and self._worker.isRunning():
+            self.status.setText("AI 正在生成中，请稍候...")
+            return
+
+        self.btn_refresh.setEnabled(False)
         self._worker = AIPushWorker(agent_cfg, prompt, self)
         self._worker.response_ready.connect(self._on_ai_ok)
         self._worker.error_occurred.connect(self._on_ai_err)
+        self._worker.finished.connect(lambda: self.btn_refresh.setEnabled(True))
         self._worker.start()
 
     def _on_ai_ok(self, text):
