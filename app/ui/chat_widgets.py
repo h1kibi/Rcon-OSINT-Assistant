@@ -1,6 +1,6 @@
 """Chat message widgets: ChatMessageWidget, ChatComposer, render_markdown."""
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, Signal, QEvent
 from PySide6.QtWidgets import (
     QFrame, QHBoxLayout, QVBoxLayout, QLabel,
     QTextBrowser, QPushButton, QTextEdit, QSizePolicy,
@@ -72,9 +72,12 @@ class ChatMessageWidget(QFrame):
             outer.addWidget(self.bubble, 0)
             outer.addStretch(1)
 
-    def set_text(self, text: str):
+    def set_text(self, text: str, markdown: bool = True):
         self._raw_text = text or ""
-        render_markdown(self.body, self._raw_text)
+        if markdown:
+            render_markdown(self.body, self._raw_text)
+        else:
+            self.body.setPlainText(self._raw_text)
         doc_height = int(self.body.document().size().height()) + 6
         self.body.setFixedHeight(max(36, doc_height))
 
@@ -98,6 +101,7 @@ class ChatComposer(QFrame):
         self.input.setObjectName("composerInput")
         self.input.setPlaceholderText("询问漏洞、CVE、KEV、EPSS 或让 Rcon 总结风险...")
         self.input.setFixedHeight(48)
+        self.input.installEventFilter(self)
         layout.addWidget(self.input, 1)
 
         self.send_btn = QPushButton("↑")
@@ -116,8 +120,11 @@ class ChatComposer(QFrame):
     def set_generating(self, generating: bool):
         self.send_btn.setText("■" if generating else "↑")
 
-    def keyPressEvent(self, event):
-        if event.key() == Qt.Key_Return and not event.modifiers():
-            self._emit_submit()
-        else:
-            super().keyPressEvent(event)
+    def eventFilter(self, obj, event):
+        if obj is self.input and event.type() == QEvent.Type.KeyPress:
+            if event.key() in (Qt.Key_Return, Qt.Key_Enter):
+                if event.modifiers() & Qt.ShiftModifier:
+                    return False
+                self._emit_submit()
+                return True
+        return super().eventFilter(obj, event)

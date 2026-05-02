@@ -326,6 +326,8 @@ class AgentPanel(QWidget):
         self._streaming = False
         self._current_stream: TypewriterRenderer | None = None
         self._current_ai_msg: ChatMessageWidget | None = None
+        self._busy = False
+        self._request_id = 0
 
         self.tools = AgentToolService(db_session_factory)
         self.agent_service = AgentService(lambda: self.config, self.tools)
@@ -538,7 +540,9 @@ class AgentPanel(QWidget):
             self._show_chat()
             self._append_user(cve_id)
             result = self.tools.cve(cve_id)
-            self._stream_assistant(str(result) if result else f"未找到 {cve_id}")
+            content = str(result) if result else f"未找到 {cve_id}"
+            self._history.append({"role": "assistant", "content": content})
+            self._stream_assistant(content)
 
     # ── Style ───────────────────────────────────────────────────────
     def update_config(self, config):
@@ -601,13 +605,10 @@ class AgentPanel(QWidget):
             result = self.tools.recent()
         else:
             result = self.tools.top_risk()
-        if isinstance(result, (dict, list)):
-            self._stream_assistant(json.dumps(result, ensure_ascii=False, indent=2))
-        else:
-            self._stream_assistant(str(result))
+        self._emit_tool_result(result)
 
     def _send(self, text: str):
-        if not text.strip() or self._streaming:
+        if not text.strip() or self._busy:
             return
         self._show_chat()
         self._append_user(text)
@@ -615,10 +616,7 @@ class AgentPanel(QWidget):
 
         db_result = self._try_db(text)
         if db_result is not None:
-            if isinstance(db_result, (dict, list)):
-                self._stream_assistant(json.dumps(db_result, ensure_ascii=False, indent=2))
-            else:
-                self._stream_assistant(str(db_result))
+            self._emit_tool_result(db_result)
             return
         self._call_ai(text)
 
@@ -658,43 +656,54 @@ class AgentPanel(QWidget):
 
         return None
 
+    def _emit_tool_result(self, result):
+        if isinstance(result, (dict, list)):
+            content = json.dumps(result, ensure_ascii=False, indent=2)
+        else:
+            content = str(result)
+        self._history.append({"role": "assistant", "content": content})
+        self._stream_assistant(content)
+
     def _call_ai(self, msg):
         cfg = getattr(self.config, "agent", None)
         if not cfg or not getattr(cfg, "api_key", ""):
             self._stream_assistant("[!] 未配置 API Key，请在设置 → Agent 配置中设置。")
             return
 
+        self._busy = True
+        self._request_id += 1
+        request_id = self._request_id
+
         self.composer.set_generating(True)
         thinking = self._append_assistant("正在思考…")
 
         self._worker = AgentWorker(self.agent_service, self._history[-10:])
         self._worker.response_ready.connect(
-            lambda text: self._on_ai_ok(thinking, text)
+            lambda text, rid=request_id: self._on_ai_ok(rid, thinking, text)
         )
         self._worker.error_occurred.connect(
-            lambda err: self._on_ai_err(thinking, err)
+            lambda err, rid=request_id: self._on_ai_err(rid, thinking, err)
         )
         self._worker.start()
 
-    def _on_ai_ok(self, thinking_widget: ChatMessageWidget, resp: str):
+    def _on_ai_ok(self, request_id: int, thinking_widget: ChatMessageWidget, resp: str):
+        if request_id != self._request_id:
+            return
         thinking_widget.deleteLater()
         self._history.append({"role": "assistant", "content": resp})
         self._stream_assistant(resp)
-        self.composer.set_generating(False)
 
-    def _on_ai_err(self, thinking_widget: ChatMessageWidget, err: str):
+    def _on_ai_err(self, request_id: int, thinking_widget: ChatMessageWidget, err: str):
+        if request_id != self._request_id:
+            return
         thinking_widget.deleteLater()
         self._stream_assistant(f"[!] {err}")
-        self.composer.set_generating(False)
 
-    def _clear(self):
-        while self.chat_layout.count() > 1:
-            item = self.chat_layout.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
-        self._history.clear()
+    def _on_stream_finished(self):
         self._streaming = False
+        self._busy = False
         self._current_stream = None
+        self.composer.set_generating(False)
         self._current_ai_msg = None
         self.chat_scroll.hide()
         self.dashboard.show()

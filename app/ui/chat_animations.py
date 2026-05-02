@@ -71,6 +71,7 @@ class TypewriterRenderer(QObject):
     def finish(self):
         self._flush(all_remaining=True)
         self.timer.stop()
+        self.target.set_text(self.visible, markdown=True)
         self.finished.emit()
 
     def _flush(self, all_remaining: bool = False):
@@ -80,4 +81,4 @@ class TypewriterRenderer(QObject):
         chunk = self.buffer[:n]
         self.buffer = self.buffer[n:]
         self.visible += chunk
-        self.target.set_text(self.visible)
+        self.target.set_text(self.visible, markdown=False)
