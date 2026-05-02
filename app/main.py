@@ -38,15 +38,6 @@ class SyncSignals(QObject):
     sync_done = Signal()
 
 
-def _run_sync_async(settings, collectors, epss_collector, scorer_config, signals):
-    """Run sync in background, emit signal when done."""
-    def _worker():
-        _run_sync(settings, collectors, epss_collector, scorer_config)
-        signals.sync_done.emit()
-    thread = threading.Thread(target=_worker, daemon=True)
-    thread.start()
-
-
 def _seed_mock_data(session):
     """Insert mock data for testing when collectors have no data."""
     now = _utcnow()
@@ -439,11 +430,9 @@ def main():
 
     # Sync scheduler (runs in background thread)
     sync_signals = SyncSignals()
-    sync_signals.sync_done.connect(main_window.load_data)
-    sync_signals.sync_done.connect(update_badge)
-
     sync_lock = threading.Lock()
     sync_pending = [False]
+    _pending_config = [None]
 
     def run_sync_locked():
         if not sync_lock.acquire(blocking=False):
@@ -454,20 +443,31 @@ def main():
             _run_sync(get_settings(), get_collectors(), get_epss(), get_scorer())
         finally:
             sync_lock.release()
-            if sync_pending[0]:
-                sync_pending[0] = False
-                QTimer.singleShot(200, sync_func)
+            sync_signals.sync_done.emit()
 
-    def sync_func():
+    def _after_sync_done():
+        """Unified post-sync handler: UI refresh, pending config, coalesced sync."""
         main_window.load_data()
         update_badge()
 
-        def _worker():
-            try:
-                run_sync_locked()
-            finally:
-                sync_signals.sync_done.emit()
+        # Pending config wins over duplicate sync request
+        cfg = _pending_config[0]
+        if cfg is not None:
+            _pending_config[0] = None
+            sync_pending[0] = False
+            on_config_changed(cfg)
+            return
 
+        # Coalesce duplicate sync into one extra run
+        if sync_pending[0]:
+            sync_pending[0] = False
+            QTimer.singleShot(500, sync_func)
+
+    sync_signals.sync_done.connect(_after_sync_done)
+
+    def sync_func():
+        def _worker():
+            run_sync_locked()
         threading.Thread(target=_worker, daemon=True).start()
 
     def sync_scheduler_recreate():
@@ -486,7 +486,7 @@ def main():
             e.http.close()
 
     def apply_config_change(new_config):
-        """Apply config change - caller must hold sync_lock."""
+        """Apply config change — caller must hold sync_lock."""
         nonlocal sync_scheduler
 
         close_collectors(_collectors_ref[0], _epss_ref[0])
@@ -513,16 +513,11 @@ def main():
         if sync_scheduler.is_running:
             sync_scheduler.update_interval(new_config.app.refresh_interval_minutes)
         else:
-            # Recreate fresh scheduler with new interval
             sync_scheduler = sync_scheduler_recreate()
             sync_scheduler.start(run_immediately=False)
             logger.info("Scheduler recreated and auto-started from config change")
 
-        # Force sync with new collectors
         QTimer.singleShot(1500, sync_func)
-
-    # Pending config for deferred application (sync running → wait)
-    _pending_config = [None]
 
     def on_config_changed(new_config):
         if sync_lock.locked():
@@ -537,15 +532,6 @@ def main():
                 sync_lock.release()
         else:
             _pending_config[0] = new_config
-
-    # Check pending config after each sync
-    def _check_pending():
-        cfg = _pending_config[0]
-        if cfg is not None:
-            _pending_config[0] = None
-            on_config_changed(cfg)
-
-    sync_signals.sync_done.connect(_check_pending)
 
     main_window.config_changed.connect(on_config_changed)
 
