@@ -6,6 +6,7 @@ from app.db.models import (
     SourceRecord, UserPreference, Notification, CollectorStatus,
     VulnerabilityChange, AIAnalysisHistory,
     AIPushReport, AIPushReportItem, HighRiskAlert, PersonalLibraryEntry,
+    AgentChatSession, AgentChatMessage,
     _utcnow,
 )
 
@@ -764,3 +765,114 @@ def _affected_product_key_from_dict(p: dict, vendor: str, product: str, pkg_name
 
 def _norm(s):
     return (s or "").strip().lower()
+
+
+def _preview(text: str, limit: int = 96) -> str:
+    text = " ".join((text or "").split())
+    if len(text) > limit:
+        return text[:limit] + "..."
+    return text
+
+
+# ─── Agent Chat Session Repository ────────────────────────────────────
+
+def create_agent_session(session: Session, title: str | None = None) -> AgentChatSession:
+    now = _utcnow()
+    obj = AgentChatSession(
+        title=title or "SESSION",
+        status="active",
+        created_at=now, updated_at=now, last_opened_at=now,
+    )
+    session.add(obj)
+    session.commit()
+    session.refresh(obj)
+    if not title:
+        obj.title = f"SESSION_{obj.id:02d}"
+        session.add(obj)
+        session.commit()
+        session.refresh(obj)
+    return obj
+
+
+def list_agent_sessions(session: Session, limit: int = 30) -> list[AgentChatSession]:
+    stmt = (
+        select(AgentChatSession)
+        .where(AgentChatSession.status == "active")
+        .order_by(
+            AgentChatSession.pinned.desc(),
+            AgentChatSession.last_opened_at.desc(),
+            AgentChatSession.updated_at.desc(),
+        )
+        .limit(limit)
+    )
+    return list(session.exec(stmt).all())
+
+
+def get_agent_messages(session: Session, session_id: int) -> list[AgentChatMessage]:
+    stmt = (
+        select(AgentChatMessage)
+        .where(AgentChatMessage.session_id == session_id)
+        .order_by(AgentChatMessage.seq.asc(), AgentChatMessage.id.asc())
+    )
+    return list(session.exec(stmt).all())
+
+
+def append_agent_message(
+    session: Session, session_id: int, role: str, content: str,
+    *, model: str = "", error: str = "", meta_json: str = "",
+) -> AgentChatMessage:
+    last_seq = session.exec(
+        select(func.max(AgentChatMessage.seq))
+        .where(AgentChatMessage.session_id == session_id)
+    ).one()
+    next_seq = int(last_seq or 0) + 1
+    now = _utcnow()
+    msg = AgentChatMessage(
+        session_id=session_id, role=role, content=content,
+        seq=next_seq, model=model, error=error, meta_json=meta_json,
+        created_at=now,
+    )
+    session.add(msg)
+    chat = session.get(AgentChatSession, session_id)
+    if chat:
+        chat.message_count += 1
+        chat.last_message_preview = _preview(content)
+        chat.last_model = model or chat.last_model
+        chat.updated_at = now
+        session.add(chat)
+    session.commit()
+    session.refresh(msg)
+    return msg
+
+
+def rename_agent_session(session: Session, session_id: int, title: str) -> bool:
+    title = " ".join((title or "").split()).strip()
+    if not title:
+        return False
+    obj = session.get(AgentChatSession, session_id)
+    if not obj or obj.status != "active":
+        return False
+    obj.title = title[:48]
+    obj.updated_at = _utcnow()
+    session.add(obj)
+    session.commit()
+    return True
+
+
+def soft_delete_agent_session(session: Session, session_id: int) -> bool:
+    obj = session.get(AgentChatSession, session_id)
+    if not obj:
+        return False
+    obj.status = "deleted"
+    obj.updated_at = _utcnow()
+    session.add(obj)
+    session.commit()
+    return True
+
+
+def touch_agent_session(session: Session, session_id: int):
+    obj = session.get(AgentChatSession, session_id)
+    if obj and obj.status == "active":
+        obj.last_opened_at = _utcnow()
+        session.add(obj)
+        session.commit()

@@ -231,3 +231,33 @@ class PersonalLibraryEntry(SQLModel, table=True):
     archived: bool = Field(default=False)
     created_at: datetime = Field(default_factory=_utcnow)
     updated_at: datetime = Field(default_factory=_utcnow)
+
+
+class AgentChatSession(SQLModel, table=True):
+    __tablename__ = "agent_chat_sessions"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    title: str = Field(default="SESSION")
+    status: str = Field(default="active", index=True)
+    pinned: bool = Field(default=False, index=True)
+    message_count: int = Field(default=0)
+    last_message_preview: str = Field(default="")
+    last_model: str = Field(default="")
+    created_at: datetime = Field(default_factory=_utcnow, index=True)
+    updated_at: datetime = Field(default_factory=_utcnow, index=True)
+    last_opened_at: datetime = Field(default_factory=_utcnow, index=True)
+
+
+class AgentChatMessage(SQLModel, table=True):
+    __tablename__ = "agent_chat_messages"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    session_id: int = Field(foreign_key="agent_chat_sessions.id", index=True)
+    role: str = Field(default="", index=True)
+    content: str = Field(default="")
+    content_format: str = Field(default="markdown")
+    seq: int = Field(default=0, index=True)
+    model: str = Field(default="")
+    error: str = Field(default="")
+    meta_json: str = Field(default="")
+    created_at: datetime = Field(default_factory=_utcnow, index=True)

@@ -57,6 +57,10 @@ def run_migrations(session: Session):
         _create_ai_push_indexes(session)
         _mark_applied(session, 4)
 
+    if 5 not in applied:
+        _create_agent_chat_tables(session)
+        _mark_applied(session, 5)
+
     logger.info(f"Schema at version(s): {sorted(_get_applied_versions(session))}")
 
 
@@ -219,3 +223,40 @@ def _create_ai_push_indexes(session: Session):
         session.execute(text(ddl))
     session.commit()
     logger.info("AI push indexes created")
+
+
+def _create_agent_chat_tables(session: Session):
+    for ddl in [
+        """CREATE TABLE IF NOT EXISTS agent_chat_sessions (
+            id INTEGER PRIMARY KEY,
+            title TEXT NOT NULL DEFAULT 'SESSION',
+            status TEXT NOT NULL DEFAULT 'active',
+            pinned BOOLEAN NOT NULL DEFAULT 0,
+            message_count INTEGER NOT NULL DEFAULT 0,
+            last_message_preview TEXT NOT NULL DEFAULT '',
+            last_model TEXT NOT NULL DEFAULT '',
+            created_at DATETIME NOT NULL,
+            updated_at DATETIME NOT NULL,
+            last_opened_at DATETIME NOT NULL
+        )""",
+        """CREATE TABLE IF NOT EXISTS agent_chat_messages (
+            id INTEGER PRIMARY KEY,
+            session_id INTEGER NOT NULL,
+            role TEXT NOT NULL DEFAULT '',
+            content TEXT NOT NULL DEFAULT '',
+            content_format TEXT NOT NULL DEFAULT 'markdown',
+            seq INTEGER NOT NULL DEFAULT 0,
+            model TEXT NOT NULL DEFAULT '',
+            error TEXT NOT NULL DEFAULT '',
+            meta_json TEXT NOT NULL DEFAULT '',
+            created_at DATETIME NOT NULL,
+            FOREIGN KEY(session_id) REFERENCES agent_chat_sessions(id)
+        )""",
+        "CREATE INDEX IF NOT EXISTS ix_agent_sessions_status_upd ON agent_chat_sessions(status, pinned DESC, updated_at DESC)",
+        "CREATE INDEX IF NOT EXISTS ix_agent_sessions_last_open ON agent_chat_sessions(status, last_opened_at DESC)",
+        "CREATE INDEX IF NOT EXISTS ix_agent_messages_session_seq ON agent_chat_messages(session_id, seq ASC)",
+        "CREATE INDEX IF NOT EXISTS ix_agent_messages_session_created ON agent_chat_messages(session_id, created_at ASC)",
+    ]:
+        session.execute(text(ddl))
+    session.commit()
+    logger.info("Agent chat tables created")

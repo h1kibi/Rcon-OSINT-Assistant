@@ -1,17 +1,13 @@
-"""Rcon AI Panel — pixel-hacker terminal workspace with multi-session chat."""
+"""Rcon AI Panel — pixel-hacker terminal workspace with persistent multi-session chat."""
 
 import json
 import re
-from dataclasses import dataclass, field
-from datetime import datetime
-from uuid import uuid4
-
 from PySide6.QtCore import Qt, Signal, QThread, QTimer
 from PySide6.QtGui import QColor, QFont
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QFrame, QApplication, QSizePolicy, QGraphicsDropShadowEffect,
-    QScrollArea, QGridLayout,
+    QScrollArea, QGridLayout, QInputDialog, QMessageBox, QMenu,
 )
 from loguru import logger
 
@@ -21,30 +17,10 @@ from app.services.agent_tools import AgentToolService
 from app.services.agent_service import AgentService
 from app.services.agent_worker import AgentWorker
 from app.ui.fonts import pixel_font, mono_font, text_font
+from app.db import repositories as repo
 
 CENTER_MAX_WIDTH = 1320
 COMPOSER_MAX_WIDTH = 1180
-
-
-# ─── Session Data ─────────────────────────────────────────────────────
-@dataclass
-class ChatMessage:
-    role: str
-    content: str
-
-
-@dataclass
-class ChatSession:
-    id: str
-    title: str
-    messages: list[ChatMessage] = field(default_factory=list)
-    history: list[dict] = field(default_factory=list)
-    created_at: datetime = field(default_factory=datetime.now)
-    updated_at: datetime = field(default_factory=datetime.now)
-
-    @property
-    def is_empty(self) -> bool:
-        return not self.messages
 
 
 AGENT_STYLE = """
@@ -59,7 +35,7 @@ QWidget#agentPanel {
 QFrame#sessionBar {
     background: qlineargradient(
         x1:0, y1:0, x2:1, y2:0,
-        stop:0 #040704, stop:0.45 #061006, stop:1 #040704
+        stop:0 #040704, stop:0.5 #061006, stop:1 #040704
     );
     border-bottom: 1px solid #15451f;
 }
@@ -87,10 +63,7 @@ QPushButton#sessionTab:hover {
 QPushButton#sessionTab:checked {
     color: #39ff14;
     border: 1px solid #39ff14;
-    background: qlineargradient(
-        x1:0, y1:0, x2:1, y2:0,
-        stop:0 #0a140a, stop:1 #0d180d
-    );
+    background: #0d180d;
 }
 
 QPushButton#newSessionBtn {
@@ -347,6 +320,36 @@ QScrollBar::sub-line:vertical {
 """
 
 
+# ─── Session Tab Widget ───────────────────────────────────────────────
+class SessionTab(QPushButton):
+    rename_requested = Signal(int)
+    delete_requested = Signal(int)
+
+    def __init__(self, session_id: int, title: str, parent=None):
+        super().__init__(title, parent)
+        self.session_id = session_id
+        self.setObjectName("sessionTab")
+        self.setCheckable(True)
+        self.setCursor(Qt.PointingHandCursor)
+        self.setMinimumWidth(132)
+        self.setMaximumWidth(220)
+        self.setFixedHeight(34)
+        self.setFont(pixel_font(9, bold=True))
+
+    def mouseDoubleClickEvent(self, event):
+        self.rename_requested.emit(self.session_id)
+
+    def contextMenuEvent(self, event):
+        menu = QMenu(self)
+        rename_action = menu.addAction("RENAME")
+        delete_action = menu.addAction("DELETE")
+        action = menu.exec(event.globalPos())
+        if action == rename_action:
+            self.rename_requested.emit(self.session_id)
+        elif action == delete_action:
+            self.delete_requested.emit(self.session_id)
+
+
 # ─── Metric Pill ──────────────────────────────────────────────────────
 class MetricPill(QFrame):
     def __init__(self, label: str, value: str, accent: str = "#39ff14", parent=None):
@@ -355,17 +358,14 @@ class MetricPill(QFrame):
         self.setMinimumHeight(78)
         self.setMaximumHeight(92)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 12, 16, 12)
         layout.setSpacing(4)
-
         self.value_label = QLabel(str(value))
         self.value_label.setObjectName("metricValue")
         self.value_label.setFont(pixel_font(16, bold=True))
         self.value_label.setStyleSheet(f"color: {accent};")
         layout.addWidget(self.value_label)
-
         lbl = QLabel(label)
         lbl.setObjectName("metricLabel")
         lbl.setFont(mono_font(10))
@@ -386,11 +386,9 @@ class PromptCard(QFrame):
         self.setCursor(Qt.PointingHandCursor)
         self.setMinimumHeight(96)
         self.setMaximumHeight(112)
-
         layout = QVBoxLayout(self)
         layout.setContentsMargins(18, 14, 18, 14)
         layout.setSpacing(8)
-
         header = QHBoxLayout()
         header.setSpacing(8)
         head = QLabel(title)
@@ -398,7 +396,6 @@ class PromptCard(QFrame):
         head.setFont(pixel_font(10, bold=True))
         header.addWidget(head)
         header.addStretch(1)
-
         if badge:
             badge_label = QLabel(badge)
             badge_label.setObjectName("promptBadge")
@@ -407,9 +404,7 @@ class PromptCard(QFrame):
             badge_label.setMinimumWidth(42)
             badge_label.setFont(pixel_font(8, bold=True))
             header.addWidget(badge_label)
-
         layout.addLayout(header)
-
         body = QLabel(desc)
         body.setObjectName("promptDesc")
         body.setFont(mono_font(10))
@@ -432,33 +427,26 @@ class RiskFeedCard(QFrame):
         self.setCursor(Qt.PointingHandCursor)
         self.setMinimumHeight(78)
         self.setMaximumHeight(92)
-
         layout = QHBoxLayout(self)
         layout.setContentsMargins(14, 12, 14, 12)
         layout.setSpacing(12)
-
         left = QVBoxLayout()
         left.setSpacing(4)
-
         cve = QLabel(data.get("cve_id", "N/A"))
         cve.setObjectName("riskCve")
         cve.setFont(pixel_font(9, bold=True))
         left.addWidget(cve)
-
         title = QLabel(data.get("title", ""))
         title.setObjectName("riskTitle")
         title.setFont(mono_font(10))
         title.setWordWrap(True)
         title.setMaximumHeight(34)
         left.addWidget(title)
-
         meta = QLabel(self._meta_text(data))
         meta.setObjectName("riskMeta")
         meta.setFont(mono_font(9))
         left.addWidget(meta)
-
         layout.addLayout(left, 1)
-
         score = int(data.get("score", 0) or 0)
         badge = QLabel(f"{score:03d}")
         badge.setObjectName("riskScore")
@@ -493,57 +481,77 @@ class AgentPanel(QWidget):
         self.db = db_session_factory
         self.setObjectName("agentPanel")
         self._worker = None
-        self._history: list[dict] = []
+        self._current_history: list[dict] = []
         self._current_vuln = None
         self._streaming = False
         self._current_stream: TypewriterRenderer | None = None
         self._current_ai_msg: ChatMessageWidget | None = None
         self._busy = False
         self._request_id = 0
-
-        self._sessions: dict[str, ChatSession] = {}
-        self._session_order: list[str] = []
-        self._current_session_id: str | None = None
+        self._sessions: list = []
+        self._current_session_id: int | None = None
 
         self.tools = AgentToolService(db_session_factory)
         self.agent_service = AgentService(lambda: self.config, self.tools)
 
         self._build_ui()
         self._apply_style()
-        self._new_session(initial=True)
-        self._load_dashboard()
+        self._load_sessions()
 
     def set_current_vuln(self, v):
         self._current_vuln = v
 
-    # ── Session Helpers ──────────────────────────────────────────────
-    def _current_session(self) -> ChatSession:
-        if not self._current_session_id or self._current_session_id not in self._sessions:
-            self._new_session(initial=True)
-        return self._sessions[self._current_session_id]
+    # ── Session Management ───────────────────────────────────────────
+    def _load_sessions(self):
+        db = self.db()
+        try:
+            sessions = repo.list_agent_sessions(db, limit=30)
+            if not sessions:
+                first = repo.create_agent_session(db)
+                sessions = [first]
+            self._sessions = sessions
+            self._current_session_id = sessions[0].id
+            repo.touch_agent_session(db, self._current_session_id)
+        finally:
+            db.close()
+        self._render_session_tabs()
+        self._load_current_session()
 
-    def _new_session(self, initial: bool = False):
-        if not initial and (self._busy or self._streaming):
-            return
-        sid = uuid4().hex[:10]
-        idx = len(self._session_order) + 1
-        session = ChatSession(id=sid, title=f"SESSION_{idx:02d}")
-        self._sessions[sid] = session
-        self._session_order.append(sid)
-        self._switch_session(sid)
+    def _refresh_sessions(self):
+        db = self.db()
+        try:
+            self._sessions = repo.list_agent_sessions(db, limit=30)
+        finally:
+            db.close()
 
-    def _switch_session(self, session_id: str):
-        if session_id not in self._sessions:
-            return
+    def _new_session(self):
         if self._busy or self._streaming:
+            return
+        db = self.db()
+        try:
+            s = repo.create_agent_session(db)
+        finally:
+            db.close()
+        self._sessions.append(s)
+        self._switch_session(s.id)
+
+    def _switch_session(self, session_id: int):
+        if self._busy or self._streaming:
+            return
+        if session_id == self._current_session_id:
             return
         self._request_id += 1
         if self._current_stream:
             self._current_stream.cancel()
             self._current_stream = None
         self._current_session_id = session_id
+        db = self.db()
+        try:
+            repo.touch_agent_session(db, session_id)
+        finally:
+            db.close()
         self._render_session_tabs()
-        self._render_current_session()
+        self._load_current_session()
 
     def _render_session_tabs(self):
         while self.session_tabs_layout.count():
@@ -551,20 +559,59 @@ class AgentPanel(QWidget):
             widget = item.widget()
             if widget:
                 widget.deleteLater()
-        for sid in self._session_order:
-            session = self._sessions[sid]
-            btn = QPushButton(session.title)
-            btn.setObjectName("sessionTab")
-            btn.setCheckable(True)
-            btn.setChecked(sid == self._current_session_id)
-            btn.setCursor(Qt.PointingHandCursor)
-            btn.setMinimumWidth(132)
-            btn.setMaximumWidth(190)
-            btn.setFixedHeight(34)
-            btn.setFont(pixel_font(9, bold=True))
-            btn.clicked.connect(lambda _, x=sid: self._switch_session(x))
-            self.session_tabs_layout.addWidget(btn)
+        for s in self._sessions:
+            tab = SessionTab(s.id, s.title)
+            tab.setChecked(s.id == self._current_session_id)
+            tab.clicked.connect(lambda _, sid=s.id: self._switch_session(sid))
+            tab.rename_requested.connect(self._rename_session_dialog)
+            tab.delete_requested.connect(self._delete_session)
+            self.session_tabs_layout.addWidget(tab)
         self.session_tabs_layout.addStretch(1)
+
+    def _rename_session_dialog(self, session_id: int):
+        s = next((x for x in self._sessions if x.id == session_id), None)
+        if not s:
+            return
+        title, ok = QInputDialog.getText(self, "RENAME_SESSION", "New session title:", text=s.title)
+        if not ok:
+            return
+        title = title.strip()
+        if not title:
+            return
+        db = self.db()
+        try:
+            repo.rename_agent_session(db, session_id, title)
+        finally:
+            db.close()
+        self._refresh_sessions()
+        self._render_session_tabs()
+
+    def _delete_session(self, session_id: int):
+        if len(self._sessions) <= 1:
+            QMessageBox.information(self, "DELETE_SESSION", "至少保留一个会话。")
+            return
+        s = next((x for x in self._sessions if x.id == session_id), None)
+        ret = QMessageBox.question(
+            self, "DELETE_SESSION",
+            f"Delete session [{s.title if s else 'SESSION'}]?",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
+        )
+        if ret != QMessageBox.Yes:
+            return
+        db = self.db()
+        try:
+            repo.soft_delete_agent_session(db, session_id)
+        finally:
+            db.close()
+        was_current = session_id == self._current_session_id
+        self._refresh_sessions()
+        if was_current:
+            if self._sessions:
+                self._switch_session(self._sessions[0].id)
+            else:
+                self._new_session()
+        else:
+            self._render_session_tabs()
 
     def _clear_chat_widgets(self):
         while self.chat_layout.count() > 1:
@@ -573,10 +620,19 @@ class AgentPanel(QWidget):
             if widget:
                 widget.deleteLater()
 
-    def _render_current_session(self):
-        session = self._current_session()
+    def _load_current_session(self):
         self._clear_chat_widgets()
-        if session.is_empty:
+        db = self.db()
+        try:
+            messages = repo.get_agent_messages(db, self._current_session_id)
+        finally:
+            db.close()
+        self._current_history = [
+            {"role": m.role, "content": m.content}
+            for m in messages
+            if m.role in ("user", "assistant", "tool", "error")
+        ]
+        if not messages:
             self.dashboard.show()
             self.chat_scroll.hide()
             self.chip_frame.show()
@@ -585,17 +641,25 @@ class AgentPanel(QWidget):
         self.dashboard.hide()
         self.chat_scroll.show()
         self.chip_frame.hide()
-        for msg in session.messages:
-            self._append_message(msg.role, msg.content, animate=False)
+        for m in messages:
+            display_role = "assistant" if m.role in ("assistant", "tool", "error") else "user"
+            self._append_message(display_role, m.content, animate=False)
         QTimer.singleShot(20, lambda: smooth_scroll_to_bottom(self.chat_scroll, duration=80))
 
-    def _maybe_update_session_title(self, session: ChatSession, first_user_text: str):
-        if session.title.startswith("SESSION_"):
-            clean = " ".join(first_user_text.strip().split())
-            clean = clean.replace("\n", " ")
-            if len(clean) > 18:
-                clean = clean[:18] + "..."
-            session.title = clean or session.title
+    def _maybe_auto_title(self, text: str):
+        s = next((x for x in self._sessions if x.id == self._current_session_id), None)
+        if not s or not s.title.startswith("SESSION_"):
+            return
+        title = " ".join(text.split())
+        title = title.replace("\n", " ")
+        title = title[:24] + "..." if len(title) > 24 else title
+        db = self.db()
+        try:
+            repo.rename_agent_session(db, s.id, title)
+        finally:
+            db.close()
+        self._refresh_sessions()
+        self._render_session_tabs()
 
     # ── Build UI ────────────────────────────────────────────────────
     def _build_ui(self):
@@ -603,10 +667,8 @@ class AgentPanel(QWidget):
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
 
-        # ── Session Bar ────────────────────────────────────────────
         root.addWidget(self._build_session_bar())
 
-        # ── Content Stack ──────────────────────────────────────────
         self.content_stack = QWidget()
         self.content_layout = QVBoxLayout(self.content_stack)
         self.content_layout.setContentsMargins(0, 0, 0, 0)
@@ -630,21 +692,17 @@ class AgentPanel(QWidget):
 
         root.addWidget(self.content_stack, 1)
 
-        # ── Chip Area ──────────────────────────────────────────────
         chip_wrap = QFrame()
         chip_wrap.setObjectName("chipWrap")
         outer = QHBoxLayout(chip_wrap)
         outer.setContentsMargins(20, 8, 20, 8)
         outer.setSpacing(0)
-
         chip_inner = QFrame()
         chip_inner.setObjectName("chipInner")
         chip_inner.setMaximumWidth(COMPOSER_MAX_WIDTH)
-
         chip_l = QHBoxLayout(chip_inner)
         chip_l.setContentsMargins(0, 0, 0, 0)
         chip_l.setSpacing(10)
-
         for text, label in [("▣", "数据库概览"), ("◉", "最近漏洞"), ("▲", "高危 Top10")]:
             btn = QPushButton(f"{text}  {label}")
             btn.setObjectName("chipBtn")
@@ -653,21 +711,17 @@ class AgentPanel(QWidget):
             btn.clicked.connect(lambda _, l=label: self._on_chip(l))
             chip_l.addWidget(btn)
         chip_l.addStretch(1)
-
         outer.addStretch(1)
         outer.addWidget(chip_inner, 1)
         outer.addStretch(1)
-
         self.chip_frame = chip_wrap
         root.addWidget(self.chip_frame)
 
-        # ── Composer ───────────────────────────────────────────────
         composer_wrap = QFrame()
         composer_wrap.setObjectName("composerWrap")
         wrap_l = QHBoxLayout(composer_wrap)
         wrap_l.setContentsMargins(20, 10, 20, 18)
         wrap_l.setSpacing(0)
-
         self.composer = ChatComposer()
         self.composer.setMaximumWidth(COMPOSER_MAX_WIDTH)
         self.composer.submitted.connect(self._send)
@@ -676,45 +730,37 @@ class AgentPanel(QWidget):
         self.composer.send_btn.setText(">>")
         self.composer.send_btn.setFixedSize(46, 34)
         self.composer.send_btn.setFont(pixel_font(10, bold=True))
-
         wrap_l.addStretch(1)
         wrap_l.addWidget(self.composer, 1)
         wrap_l.addStretch(1)
-
         root.addWidget(composer_wrap)
 
     def _build_session_bar(self):
         bar = QFrame()
         bar.setObjectName("sessionBar")
         bar.setFixedHeight(54)
-
         layout = QHBoxLayout(bar)
         layout.setContentsMargins(18, 8, 18, 8)
         layout.setSpacing(10)
-
         self.session_scroll = QScrollArea()
         self.session_scroll.setObjectName("sessionScroll")
         self.session_scroll.setWidgetResizable(True)
         self.session_scroll.setFrameShape(QFrame.NoFrame)
         self.session_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.session_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-
         self.session_tabs_container = QWidget()
         self.session_tabs_layout = QHBoxLayout(self.session_tabs_container)
         self.session_tabs_layout.setContentsMargins(0, 0, 0, 0)
         self.session_tabs_layout.setSpacing(8)
         self.session_tabs_layout.addStretch(1)
-
         self.session_scroll.setWidget(self.session_tabs_container)
         layout.addWidget(self.session_scroll, 1)
-
         self.btn_new = QPushButton("+ NEW")
         self.btn_new.setObjectName("newSessionBtn")
         self.btn_new.setCursor(Qt.PointingHandCursor)
         self.btn_new.setFont(pixel_font(9, bold=True))
-        self.btn_new.clicked.connect(lambda: self._new_session())
+        self.btn_new.clicked.connect(self._new_session)
         layout.addWidget(self.btn_new)
-
         return bar
 
     def _build_hero_card(self):
@@ -722,26 +768,21 @@ class AgentPanel(QWidget):
         hero.setObjectName("heroCard")
         hero.setMinimumHeight(140)
         hero.setMaximumHeight(160)
-
         layout = QVBoxLayout(hero)
         layout.setContentsMargins(28, 24, 28, 24)
         layout.setSpacing(9)
-
         title = QLabel("RCON_AI")
         title.setObjectName("heroTitle")
         title.setFont(pixel_font(22, bold=True))
         layout.addWidget(title)
-
         sub = QLabel("LOCAL VULN INTEL ASSISTANT")
         sub.setObjectName("heroSubtitle")
         sub.setFont(mono_font(11))
         layout.addWidget(sub)
-
         prompt = QLabel("> query CVE / KEV / EPSS / PATCH_PRIORITY")
         prompt.setObjectName("heroPrompt")
         prompt.setFont(mono_font(11, bold=True))
         layout.addWidget(prompt)
-
         layout.addStretch(1)
         return hero
 
@@ -750,29 +791,22 @@ class AgentPanel(QWidget):
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.NoFrame)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-
         page = QWidget()
         page_layout = QHBoxLayout(page)
         page_layout.setContentsMargins(20, 28, 20, 24)
         page_layout.setSpacing(0)
-
         shell = QFrame()
         shell.setObjectName("dashboardShell")
         shell.setMaximumWidth(CENTER_MAX_WIDTH)
-
         shell_layout = QVBoxLayout(shell)
         shell_layout.setContentsMargins(0, 0, 0, 0)
         shell_layout.setSpacing(16)
-
         main_row = QHBoxLayout()
         main_row.setSpacing(18)
-
         left_col = QVBoxLayout()
         left_col.setSpacing(14)
-
         hero = self._build_hero_card()
         left_col.addWidget(hero)
-
         metrics = QHBoxLayout()
         metrics.setSpacing(10)
         self.card_total = MetricPill("总漏洞", "—", "#39ff14")
@@ -782,61 +816,46 @@ class AgentPanel(QWidget):
         for card in [self.card_total, self.card_kev, self.card_unread, self.card_high]:
             metrics.addWidget(card)
         left_col.addLayout(metrics)
-
         prompt_grid = QGridLayout()
         prompt_grid.setSpacing(12)
-
         prompts = [
             ("今日优先处置", "汇总当前最值得优先修复的风险。",
              "根据本地漏洞数据库，总结当前最值得优先处置的漏洞，并说明排序原因。", "P1"),
-            ("KEV 命中分析", "查看存在在野利用证据的关键漏洞。",
-             "高危 Top10", "KEV"),
-            ("最近新增漏洞", "快速浏览最近同步进来的漏洞情报。",
-             "最近漏洞", "NEW"),
+            ("KEV 命中分析", "查看存在在野利用证据的关键漏洞。", "高危 Top10", "KEV"),
+            ("最近新增漏洞", "快速浏览最近同步进来的漏洞情报。", "最近漏洞", "NEW"),
             ("修复优先级清单", "生成面向安全运营的处置建议。",
              "请根据当前漏洞库生成一份修复优先级清单，按紧急程度分组，并给出修复建议。", "FIX"),
         ]
-
         for i, (p_title, desc, prompt, badge) in enumerate(prompts):
             card = PromptCard(p_title, desc, prompt, badge)
             card.clicked.connect(self._send_prompt)
             prompt_grid.addWidget(card, i // 2, i % 2)
-
         left_col.addLayout(prompt_grid)
         left_col.addStretch(1)
-
         right_col = QVBoxLayout()
         right_col.setSpacing(12)
-
         right_header = QHBoxLayout()
         feed_title = QLabel("RECENT_RISK_FEED")
         feed_title.setObjectName("sectionTitle")
         feed_title.setFont(pixel_font(11, bold=True))
         right_header.addWidget(feed_title)
         right_header.addStretch()
-
         self.btn_more = QPushButton("VIEW_ALL")
         self.btn_more.setObjectName("linkBtn")
         self.btn_more.setFont(pixel_font(9, bold=True))
         self.btn_more.clicked.connect(lambda: self._on_chip("最近漏洞"))
         right_header.addWidget(self.btn_more)
-
         right_col.addLayout(right_header)
-
         self.vuln_list = QVBoxLayout()
         self.vuln_list.setSpacing(8)
         right_col.addLayout(self.vuln_list)
         right_col.addStretch(1)
-
         main_row.addLayout(left_col, 7)
         main_row.addLayout(right_col, 5)
-
         shell_layout.addLayout(main_row)
-
         page_layout.addStretch(1)
         page_layout.addWidget(shell, 1)
         page_layout.addStretch(1)
-
         scroll.setWidget(page)
         return scroll
 
@@ -859,7 +878,6 @@ class AgentPanel(QWidget):
             self.card_kev.set_value(stats["kev"])
             self.card_unread.set_value(stats["unread"])
             self.card_high.set_value(stats["high"])
-
             vulns = self.tools.recent()
             if not vulns:
                 empty = QLabel("暂无漏洞数据，等待同步完成后自动刷新")
@@ -880,11 +898,7 @@ class AgentPanel(QWidget):
             self._append_user_text(f"分析 {cve_id} 的风险和修复建议")
             result = self.tools.cve(cve_id)
             content = str(result) if result else f"未找到 {cve_id}"
-            session = self._current_session()
-            session.messages.append(ChatMessage("assistant", content))
-            session.history.append({"role": "assistant", "content": content})
-            session.updated_at = datetime.now()
-            self._stream_assistant(content)
+            self._persist_and_stream("tool", content)
 
     # ── Style ───────────────────────────────────────────────────────
     def update_config(self, config):
@@ -913,7 +927,17 @@ class AgentPanel(QWidget):
     def _append_user_text(self, text: str):
         self._append_message("user", text)
 
-    # ── Streaming ───────────────────────────────────────────────────
+    # ── Persist + Stream ────────────────────────────────────────────
+    def _persist_and_stream(self, role: str, content: str, model: str = "", error: str = ""):
+        db = self.db()
+        try:
+            repo.append_agent_message(db, self._current_session_id, role, content, model=model, error=error)
+        finally:
+            db.close()
+        history_role = "assistant" if role in ("tool", "error") else role
+        self._current_history.append({"role": history_role, "content": content})
+        self._stream_assistant(content)
+
     def _stream_assistant(self, text: str):
         self._streaming = True
         msg = self._append_message("assistant", "")
@@ -936,39 +960,28 @@ class AgentPanel(QWidget):
             return
         self._show_chat()
         self._append_user_text(f"[{label}]")
-
-        session = self._current_session()
-        session.messages.append(ChatMessage("user", f"[{label}]"))
-        session.history.append({"role": "user", "content": f"[{label}]"})
-        session.updated_at = datetime.now()
-
+        self._persist_and_stream("user", f"[{label}]")
         if qtype == "stats":
             result = self.tools.stats()
         elif qtype == "recent":
             result = self.tools.recent()
         else:
             result = self.tools.top_risk()
-        self._emit_tool_result(result)
+        content = json.dumps(result, ensure_ascii=False, indent=2) if isinstance(result, (dict, list)) else str(result)
+        self._persist_and_stream("tool", content)
 
     def _send(self, text: str):
         text = text.strip()
         if not text or self._busy or self._streaming:
             return
-
-        session = self._current_session()
         self._show_chat()
-
-        session.messages.append(ChatMessage("user", text))
-        session.history.append({"role": "user", "content": text})
-        session.updated_at = datetime.now()
-
-        self._append_message("user", text)
-        self._maybe_update_session_title(session, text)
-        self._render_session_tabs()
-
+        self._persist_and_stream("user", text)
+        self._append_user_text(text)
+        self._maybe_auto_title(text)
         db_result = self._try_db(text)
         if db_result is not None:
-            self._emit_tool_result(db_result)
+            content = json.dumps(db_result, ensure_ascii=False, indent=2) if isinstance(db_result, (dict, list)) else str(db_result)
+            self._persist_and_stream("tool", content)
             return
         self._call_ai(text)
 
@@ -983,7 +996,7 @@ class AgentPanel(QWidget):
             return result if result else f"未在本地数据库中找到 {cve_id}。"
         first_sentence = re.split(r"[。！？\n]", normalized, maxsplit=1)[0]
         short_query = len(normalized) <= 24
-        no_context = len(self._current_session().history) <= 1
+        no_context = len(self._current_history) <= 1
         allow_tool = short_query or no_context
         def starts_with_any(words):
             return any(first_sentence.startswith(w) for w in words)
@@ -998,33 +1011,18 @@ class AgentPanel(QWidget):
             return self.tools.search(search_match.group(2).strip())
         return None
 
-    def _emit_tool_result(self, result):
-        if isinstance(result, (dict, list)):
-            content = json.dumps(result, ensure_ascii=False, indent=2)
-        else:
-            content = str(result)
-        session = self._current_session()
-        session.messages.append(ChatMessage("assistant", content))
-        session.history.append({"role": "assistant", "content": content})
-        session.updated_at = datetime.now()
-        self._stream_assistant(content)
-
     def _call_ai(self, text: str):
         cfg = getattr(self.config, "agent", None)
         if not cfg or not getattr(cfg, "api_key", ""):
-            self._emit_tool_result("[!] 未配置 API Key，请在设置 → Agent 配置中设置。")
+            self._persist_and_stream("error", "[!] 未配置 API Key，请在设置 → Agent 配置中设置。")
             return
-
-        session = self._current_session()
         self._busy = True
         self._request_id += 1
         request_id = self._request_id
-        session_id = session.id
-
+        session_id = self._current_session_id
         self.composer.set_generating(True)
         thinking = self._append_message("assistant", "正在思考…")
-
-        self._worker = AgentWorker(self.agent_service, session.history[-10:])
+        self._worker = AgentWorker(self.agent_service, self._current_history[-10:])
         self._worker.response_ready.connect(
             lambda text, rid=request_id, sid=session_id: self._on_ai_ok(rid, sid, thinking, text)
         )
@@ -1033,25 +1031,30 @@ class AgentPanel(QWidget):
         )
         self._worker.start()
 
-    def _on_ai_ok(self, request_id: int, session_id: str, thinking_widget, text: str):
+    def _on_ai_ok(self, request_id: int, session_id: int, thinking_widget, text: str):
         if request_id != self._request_id or session_id != self._current_session_id:
             return
         thinking_widget.deleteLater()
-        session = self._sessions[session_id]
-        session.messages.append(ChatMessage("assistant", text))
-        session.history.append({"role": "assistant", "content": text})
-        session.updated_at = datetime.now()
+        model = getattr(getattr(self.config, "agent", None), "model", "")
+        db = self.db()
+        try:
+            repo.append_agent_message(db, session_id, "assistant", text, model=model)
+        finally:
+            db.close()
+        self._current_history.append({"role": "assistant", "content": text})
         self._stream_assistant(text)
 
-    def _on_ai_err(self, request_id: int, session_id: str, thinking_widget, err: str):
+    def _on_ai_err(self, request_id: int, session_id: int, thinking_widget, err: str):
         if request_id != self._request_id or session_id != self._current_session_id:
             return
         thinking_widget.deleteLater()
         content = f"[!] {err}"
-        session = self._sessions[session_id]
-        session.messages.append(ChatMessage("assistant", content))
-        session.history.append({"role": "assistant", "content": content})
-        session.updated_at = datetime.now()
+        db = self.db()
+        try:
+            repo.append_agent_message(db, session_id, "error", content, error=err)
+        finally:
+            db.close()
+        self._current_history.append({"role": "assistant", "content": content})
         self._stream_assistant(content)
 
     def _on_stream_finished(self):
@@ -1059,22 +1062,3 @@ class AgentPanel(QWidget):
         self._busy = False
         self._current_stream = None
         self.composer.set_generating(False)
-
-    def _clear(self):
-        self._request_id += 1
-        if self._current_stream:
-            self._current_stream.cancel()
-            self._current_stream = None
-        while self.chat_layout.count() > 1:
-            item = self.chat_layout.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
-        self._history.clear()
-        self._streaming = False
-        self._busy = False
-        self._current_ai_msg = None
-        self.composer.set_generating(False)
-        self.chat_scroll.hide()
-        self.dashboard.show()
-        self.chip_frame.show()
-        self._load_dashboard()
