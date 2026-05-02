@@ -587,10 +587,6 @@ class AgentPanel(QWidget):
         renderer.feed(text)
         QTimer.singleShot(max(280, min(1800, len(text) * 4)), renderer.finish)
 
-    def _on_stream_finished(self):
-        self._streaming = False
-        self._current_stream = None
-
     # ── Actions ─────────────────────────────────────────────────────
     def _on_chip(self, label):
         mapping = {"数据库概览": "stats", "最近漏洞": "recent", "高危 Top10": "top_risk"}
@@ -706,6 +702,11 @@ class AgentPanel(QWidget):
         self.composer.set_generating(False)
 
     def _clear(self):
+        self._request_id += 1
+        if self._current_stream:
+            self._current_stream.cancel()
+            self._current_stream = None
+
         while self.chat_layout.count() > 1:
             item = self.chat_layout.takeAt(0)
             if item.widget():
@@ -717,5 +718,4 @@ class AgentPanel(QWidget):
         self._current_ai_msg = None
         self.chat_scroll.hide()
         self.dashboard.show()
-        self._load_dashboard()
         self._load_dashboard()

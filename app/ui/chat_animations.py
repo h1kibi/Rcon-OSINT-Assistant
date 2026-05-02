@@ -56,26 +56,38 @@ class TypewriterRenderer(QObject):
         self.target = target_message
         self.buffer = ""
         self.visible = ""
+        self._cancelled = False
         self.timer = QTimer(self)
         self.timer.timeout.connect(self._flush)
 
     def start(self):
+        self._cancelled = False
         self.buffer = ""
         self.visible = ""
         self.target.set_text("")
         self.timer.start(16)
 
+    def cancel(self):
+        self._cancelled = True
+        self.timer.stop()
+        self.buffer = ""
+        self.visible = ""
+        self.target = None
+
     def feed(self, text: str):
         self.buffer += text or ""
 
     def finish(self):
+        if self._cancelled or self.target is None:
+            return
         self._flush(all_remaining=True)
         self.timer.stop()
-        self.target.set_text(self.visible, markdown=True)
+        if self.target is not None:
+            self.target.set_text(self.visible, markdown=True)
         self.finished.emit()
 
     def _flush(self, all_remaining: bool = False):
-        if not self.buffer:
+        if self._cancelled or self.target is None or not self.buffer:
             return
         n = len(self.buffer) if all_remaining else min(8, len(self.buffer))
         chunk = self.buffer[:n]
