@@ -622,14 +622,18 @@ def main():
         lambda: _rescore_all(get_settings(), get_scorer())
     )
 
-    # Start scheduler if any collectors are enabled
-    if get_collectors():
+    # Start scheduler only if auto-update enabled and collectors exist
+    if get_settings().app.auto_update_enabled and get_collectors():
         sync_scheduler.start(run_immediately=False)
-        QTimer.singleShot(2000, update_database)
+        logger.info("Auto database update enabled, scheduler started")
     else:
-        logger.info("No collectors enabled; periodic sync skipped")
+        logger.info("Auto database update disabled, scheduler not started")
 
-    # AI Push: start generation after first sync
+    # Startup database update only if explicitly enabled
+    if get_settings().app.auto_update_on_startup:
+        QTimer.singleShot(2000, update_database)
+
+    # AI Push: start generation after short delay (uses local data by default)
     QTimer.singleShot(3000, ai_push_manager.start_on_boot)
 
     # Show main window

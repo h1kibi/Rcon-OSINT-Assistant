@@ -191,6 +191,25 @@ class SettingsDialog(QDialog):
         g1.setLayout(l1)
         layout.addWidget(g1)
 
+        # ── 联网行为 ──
+        g_net = QGroupBox("联网行为")
+        l_net = QVBoxLayout()
+        l_net.setSpacing(10)
+        self.chk_auto_update_startup = GlowCheckBox("启动时自动联网更新数据库")
+        self.chk_auto_update_startup.setToolTip("打开程序后自动从互联网拉取最新漏洞情报")
+        self.chk_auto_update_startup.setChecked(getattr(self.config.app, "auto_update_on_startup", False))
+        l_net.addWidget(self.chk_auto_update_startup)
+        self.chk_auto_update_enabled = GlowCheckBox("启用后台定时联网更新")
+        self.chk_auto_update_enabled.setToolTip("按设置的刷新间隔定时更新本地数据库")
+        self.chk_auto_update_enabled.setChecked(getattr(self.config.app, "auto_update_enabled", False))
+        l_net.addWidget(self.chk_auto_update_enabled)
+        self.chk_update_ai_push_startup = GlowCheckBox("启动后 AI 推送前先联网更新")
+        self.chk_update_ai_push_startup.setToolTip("启动后生成 AI 推送前，先执行一次数据库更新")
+        self.chk_update_ai_push_startup.setChecked(getattr(self.config.app, "update_on_ai_push_startup", False))
+        l_net.addWidget(self.chk_update_ai_push_startup)
+        g_net.setLayout(l_net)
+        layout.addWidget(g_net)
+
         # ── 网络代理 ──
         g2 = QGroupBox("网络代理")
         l2 = QVBoxLayout()
@@ -663,6 +682,9 @@ class SettingsDialog(QDialog):
     def _on_save(self):
         self._result = {
             "refresh_interval_minutes": self.refresh_interval.value(),
+            "auto_update_on_startup": self.chk_auto_update_startup.isChecked(),
+            "auto_update_enabled": self.chk_auto_update_enabled.isChecked(),
+            "update_on_ai_push_startup": self.chk_update_ai_push_startup.isChecked(),
             "min_score_to_badge": self.min_badge.value(),
             "min_score_to_notify": self.min_notify.value(),
             "quiet_hours_enabled": self.quiet_enabled.isChecked(),

@@ -42,9 +42,13 @@ class AIPushManager(QObject):
 
     def start_on_boot(self):
         self._startup_pending = True
-        self._status = "waiting_sync"
-        self.generation_started.emit()
-        self.request_sync()
+        if self.get_config().app.update_on_ai_push_startup:
+            self._status = "waiting_sync"
+            self.generation_started.emit()
+            self.request_sync()
+        else:
+            self._status = "idle"
+            self._start_generation("startup_local")
 
     def refresh_alert_count(self):
         session = self.session_factory()

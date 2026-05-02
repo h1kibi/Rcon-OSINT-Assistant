@@ -605,6 +605,14 @@ class MainWindow(QMainWindow):
         data["proxy"]["http_proxy"] = result.get("http_proxy", "")
         data["proxy"]["https_proxy"] = result.get("https_proxy", "")
 
+        # Save app settings
+        if "app" not in data:
+            data["app"] = {}
+        data["app"]["auto_update_on_startup"] = result.get("auto_update_on_startup", False)
+        data["app"]["auto_update_enabled"] = result.get("auto_update_enabled", False)
+        data["app"]["update_on_ai_push_startup"] = result.get("update_on_ai_push_startup", False)
+        data["app"]["refresh_interval_minutes"] = result.get("refresh_interval_minutes", 15)
+
         if "nvd" not in data:
             data["nvd"] = {}
         data["nvd"]["enabled"] = result.get("nvd_enabled", True)

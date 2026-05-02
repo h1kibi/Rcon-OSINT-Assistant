@@ -1,10 +1,16 @@
 [app]
 # 数据刷新间隔 (分钟)
-refresh_interval_minutes = 15
+refresh_interval_minutes = 60
 # SQLite 数据库路径
-database_url = "sqlite:///rcon.db"
+database_url = "sqlite:///data/rcon.db"
 # 是否最小化启动
 start_minimized = false
+# 启动时自动联网更新数据库
+auto_update_on_startup = false
+# 启用后台定时联网更新
+auto_update_enabled = false
+# 启动后 AI 推送前先联网更新
+update_on_ai_push_startup = false
 
 [proxy]
 # 代理设置 (留空则不使用代理)
