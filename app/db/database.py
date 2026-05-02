@@ -1,7 +1,12 @@
 from sqlmodel import SQLModel, Session, create_engine
 from loguru import logger
+import re
 
 engine = None
+
+
+def _redact_url(url: str) -> str:
+    return re.sub(r'://[^@]*@', '://***:***@', url)
 
 
 def init_db(database_url: str):
@@ -16,7 +21,7 @@ def init_db(database_url: str):
         },
     )
     SQLModel.metadata.create_all(engine)
-    logger.info(f"Database initialized: {database_url}")
+    logger.info(f"Database initialized: {_redact_url(database_url)}")
 
 
 def get_session() -> Session:

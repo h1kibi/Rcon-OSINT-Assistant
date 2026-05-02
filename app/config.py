@@ -212,7 +212,8 @@ def load_config(config_path: Optional[Path] = None) -> Settings:
             for section_name, model_cls in _CONFIG_MODELS.items():
                 if section_name in data:
                     section_data = data[section_name]
-                    # Merge: TOML provides base, env vars override (higher priority)
+                    # TOML provides base, env vars override (higher priority)
+                    current = getattr(settings, section_name)
                     current_dict = current.model_dump()
                     merged = {**section_data, **current_dict}
                     setattr(settings, section_name, model_cls(**merged))

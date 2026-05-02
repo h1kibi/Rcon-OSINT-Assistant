@@ -11,13 +11,19 @@ _PROXY_ENABLED: bool = False
 _PROXY_DECISIONS: dict[str, bool] = {}
 
 
+def _redact_url(url: str) -> str:
+    """Redact username:password from URLs for logging."""
+    import re
+    return re.sub(r'://[^@]*@', '://***:***@', url)
+
+
 def set_global_proxy(http_proxy: str = "", https_proxy: str = "", enabled: bool = False):
     """Set global proxy for all HTTP clients."""
     global _PROXY_URL, _PROXY_ENABLED
     if enabled and (http_proxy or https_proxy):
         _PROXY_URL = https_proxy or http_proxy
         _PROXY_ENABLED = True
-        logger.info(f"Proxy configured: {_PROXY_URL}")
+        logger.info(f"Proxy enabled: {_redact_url(_PROXY_URL)}")
         # Test proxy connectivity
         _test_proxy()
     else:

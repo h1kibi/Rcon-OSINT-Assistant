@@ -422,7 +422,7 @@ def main():
 
     # Badge timer
     def update_badge():
-        count = main_window.get_unread_count(settings.ui.min_score_to_badge)
+        count = main_window.get_unread_count(get_settings().ui.min_score_to_badge)
         floating_ball.set_unread_count(count)
 
     badge_timer = QTimer()

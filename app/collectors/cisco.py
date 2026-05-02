@@ -40,6 +40,11 @@ class CiscoCollector(Collector):
         advisories = []
         try:
             headers = {"Accept": "application/json"}
+            if self.client_id and self.client_secret:
+                token = self._get_token()
+                if token:
+                    headers["Authorization"] = f"Bearer {token}"
+
             resp = self.http.get(self.base_url, headers=headers)
             data = resp.json()
             if isinstance(data, list):
@@ -51,7 +56,7 @@ class CiscoCollector(Collector):
                         raw_data=item,
                     ))
         except Exception as e:
-            logger.error(f"Cisco fetch failed: {e}")
+            logger.warning(f"Cisco fetch failed: {e}")
 
         logger.info(f"Cisco: fetched {len(advisories)} advisories")
         return advisories
