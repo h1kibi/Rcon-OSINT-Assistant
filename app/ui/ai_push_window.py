@@ -1,34 +1,10 @@
 """AI Push briefing window."""
 
-from PySide6.QtCore import Qt, Signal, QThread
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QTextBrowser,
     QPushButton, QApplication,
 )
-from loguru import logger
-from app.services.llm_client import call_chat_completion, LLMClientError
-
-
-class AIPushWorker(QThread):
-    response_ready = Signal(str)
-    error_occurred = Signal(str)
-
-    def __init__(self, agent_config, prompt: str, parent=None):
-        super().__init__(parent)
-        self.agent_config = agent_config
-        self.prompt = prompt
-
-    def run(self):
-        try:
-            result = call_chat_completion(
-                self.agent_config,
-                system_prompt="你是专业漏洞情报分析员，只基于用户提供的数据生成推送，不编造信息。",
-                user_prompt=self.prompt,
-            )
-            self.response_ready.emit(result)
-        except Exception as e:
-            logger.exception("AI push generation failed")
-            self.error_occurred.emit(f"{type(e).__name__}: {e}")
 
 
 STYLE = """

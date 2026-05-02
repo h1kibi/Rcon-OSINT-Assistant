@@ -1,8 +1,7 @@
 """AI Push Manager: background report generation, alert tracking, cooldown."""
-import hashlib
 import json
 from datetime import timedelta
-from PySide6.QtCore import QObject, Signal
+from PySide6.QtCore import QObject, Signal, QThread
 from loguru import logger
 
 from app.db import repositories as repo
@@ -13,10 +12,33 @@ from app.services.ai_push_service import (
     build_rule_based_push,
     build_ai_push_prompt,
     build_push_context_hash,
+    check_output_guardrails,
 )
-from app.ui.ai_push_window import AIPushWorker
+from app.services.llm_client import call_chat_completion
 
 MIN_REPORT_INTERVAL_MINUTES = 60
+
+
+class AIPushWorker(QThread):
+    response_ready = Signal(str)
+    error_occurred = Signal(str)
+
+    def __init__(self, agent_config, prompt: str, parent=None):
+        super().__init__(parent)
+        self.agent_config = agent_config
+        self.prompt = prompt
+
+    def run(self):
+        try:
+            result = call_chat_completion(
+                self.agent_config,
+                system_prompt="你是专业漏洞情报分析员，只基于用户提供的数据生成推送，不编造信息。",
+                user_prompt=self.prompt,
+            )
+            self.response_ready.emit(result)
+        except Exception as e:
+            logger.exception("AI push generation failed")
+            self.error_occurred.emit(f"{type(e).__name__}: {e}")
 
 
 class AIPushManager(QObject):
@@ -70,7 +92,6 @@ class AIPushManager(QObject):
                 if not latest:
                     triggered = True
                 elif latest.status not in {"ready_rule", "ready_ai"}:
-                    # Error or queued report — retry
                     triggered = True
                 elif repo.count_unalerted_high_risk_candidates(session) > 0:
                     triggered = True
@@ -92,18 +113,29 @@ class AIPushManager(QObject):
         session = self.session_factory()
         report_id = None
         try:
-            report = repo.create_ai_push_report(session, trigger_type=trigger_type)
-            report_id = report.id
             candidates = get_ai_push_candidates(session, limit=5, days=14)
             items = [build_vuln_push_payload(session, v) for v in candidates]
+            context_hash = build_push_context_hash(items)
+
+            # Dedup before creating report — skip if same candidates already ready
+            latest_ready = repo.get_latest_ready_ai_push_report(session)
+            has_new_alert_now = repo.count_unalerted_high_risk_candidates(session) > 0
+            if latest_ready and latest_ready.content_hash == context_hash and not has_new_alert_now:
+                self._status = "idle"
+                self.report_ready.emit(latest_ready.id)
+                self._emit_alert_count(session)
+                return
+
+            # Create report only after dedup check passes
+            report = repo.create_ai_push_report(session, trigger_type=trigger_type)
+            report_id = report.id
 
             if not items:
                 rule_md = "# AI推送\n\n暂无符合条件的高危漏洞。"
-                content_hash = build_push_context_hash(items)
                 repo.save_ai_push_report_ready(
                     session, report.id, rule_content=rule_md, ai_content="",
                     final_content=rule_md, prompt="", context_json="[]",
-                    content_hash=content_hash, model="rule-based",
+                    content_hash=context_hash, model="rule-based",
                     candidate_count=0, high_risk_count=0,
                     new_high_risk_count=0, status="ready_rule",
                 )
@@ -113,21 +145,9 @@ class AIPushManager(QObject):
                 self._emit_alert_count(session)
                 return
 
-            context_hash = build_push_context_hash(items)
-
-            # Skip if same candidates already produced a ready report
-            latest_ready = repo.get_latest_ready_ai_push_report(session)
-            has_new_alert_now = repo.count_unalerted_high_risk_candidates(session) > 0
-            if latest_ready and latest_ready.content_hash == context_hash and not has_new_alert_now:
-                self._status = "idle"
-                self.report_ready.emit(latest_ready.id)
-                self._emit_alert_count(session)
-                return
-
             rule_md = build_rule_based_push(items)
             prompt = build_ai_push_prompt(items)
             context_json = json.dumps(items, ensure_ascii=False, default=str)
-            content_hash_from_rule = hashlib.sha256(rule_md.encode("utf-8")).hexdigest()
 
             repo.add_ai_push_report_items(session, report.id, items)
             new_count = repo.upsert_high_risk_alerts(session, report.id, items)
@@ -176,15 +196,29 @@ class AIPushManager(QObject):
     def _on_ai_ok(self, report_id, text, rule_md, prompt, context_json, context_hash, items, new_count):
         session = self.session_factory()
         try:
-            content_hash = context_hash
-            cfg = self.get_config()
-            model = getattr(cfg.agent, "model", "unknown") if hasattr(cfg, "agent") else "unknown"
+            ok, warning = check_output_guardrails(text)
+
+            if not ok:
+                logger.warning(f"AI push output blocked by guardrails: {warning}")
+                final_content = rule_md
+                ai_content = text
+                status = "ready_rule"
+                error = warning
+                model = "rule-based-fallback"
+            else:
+                final_content = text
+                ai_content = text
+                status = "ready_ai"
+                error = ""
+                cfg = self.get_config()
+                model = getattr(cfg.agent, "model", "unknown") if hasattr(cfg, "agent") else "unknown"
+
             repo.save_ai_push_report_ready(
-                session, report_id, rule_content=rule_md, ai_content=text,
-                final_content=text, prompt=prompt, context_json=context_json,
-                content_hash=content_hash, model=model,
+                session, report_id, rule_content=rule_md, ai_content=ai_content,
+                final_content=final_content, prompt=prompt, context_json=context_json,
+                content_hash=context_hash, model=model,
                 candidate_count=len(items), high_risk_count=len(items),
-                new_high_risk_count=new_count, status="ready_ai",
+                new_high_risk_count=new_count, status=status, error=error,
             )
             repo.add_personal_library_report_entry(session, report_id, "AI推送：最新高危漏洞简报")
             self.report_ready.emit(report_id)
@@ -204,11 +238,10 @@ class AIPushManager(QObject):
     def _on_ai_err(self, report_id, err, rule_md, prompt, context_json, context_hash, items, new_count):
         session = self.session_factory()
         try:
-            content_hash = context_hash
             repo.save_ai_push_report_ready(
                 session, report_id, rule_content=rule_md, ai_content="",
                 final_content=rule_md, prompt=prompt, context_json=context_json,
-                content_hash=content_hash, model="rule-based",
+                content_hash=context_hash, model="rule-based",
                 candidate_count=len(items), high_risk_count=len(items),
                 new_high_risk_count=new_count, status="ready_rule",
                 error=f"AI optimization failed: {err}",
