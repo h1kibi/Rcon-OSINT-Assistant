@@ -345,7 +345,6 @@ class RobotOrb(QWidget):
         """)
         items = [
             ("打开面板", self.open_main),
-            ("刷新显示", self.refresh_now),
             ("更新数据库", self.update_database_requested),
             ("AI推送", self.ai_push_requested),
             ("恢复采集" if self._paused else "暂停采集", self.toggle_pause),
