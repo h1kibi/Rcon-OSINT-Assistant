@@ -32,6 +32,7 @@ from app.collectors.cn_vendor import ChineseVendorCollector
 from app.ui.floating_ball import RobotOrb
 from app.ui.main_window import MainWindow
 from app.ui.ai_push_window import AIPushWindow
+from app.services.ai_push_manager import AIPushManager
 
 
 class SyncSignals(QObject):
@@ -460,6 +461,7 @@ def main():
         update_badge()
         if hasattr(main_window, "agent_panel"):
             main_window.agent_panel.refresh_dashboard()
+        ai_push_manager.on_sync_done()
 
         # Pending config wins over duplicate sync request
         cfg = _pending_config[0]
@@ -560,13 +562,27 @@ def main():
     floating_ball.open_settings.connect(main_window._open_settings)
     floating_ball.ai_push_requested.connect(lambda: _open_ai_push())
 
+    # AI Push Manager
+    ai_push_manager = AIPushManager(
+        session_factory=get_session,
+        get_config=get_settings,
+        request_sync=sync_func,
+        parent=main_window,
+    )
+    main_window.ai_push_manager = ai_push_manager
+    ai_push_manager.alert_count_changed.connect(floating_ball.set_ai_alert_count)
+
     def _open_ai_push():
         try:
-            win = AIPushWindow(
-                session_factory=get_session,
-                config=get_settings(),
-                parent=main_window,
-            )
+            if ai_push_manager.is_generating():
+                win = AIPushWindow.waiting(parent=main_window)
+            else:
+                report_id = ai_push_manager.get_latest_report_id()
+                if report_id:
+                    win = AIPushWindow.from_report(get_session, report_id, parent=main_window)
+                    ai_push_manager.mark_report_viewed(report_id)
+                else:
+                    win = AIPushWindow.message("暂无AI推送报告", "AI推送报告尚未生成，请稍作等待。", parent=main_window)
             main_window._ai_push_window = win
             win.show()
             win.raise_()
@@ -585,6 +601,9 @@ def main():
         QTimer.singleShot(2000, sync_func)
     else:
         logger.info("No collectors enabled; periodic sync skipped")
+
+    # AI Push: start generation after first sync
+    QTimer.singleShot(3000, ai_push_manager.start_on_boot)
 
     # Show main window
     if not settings.app.start_minimized:

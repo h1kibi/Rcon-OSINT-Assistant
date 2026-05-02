@@ -68,6 +68,69 @@ def run_schema_migrations(session: Session):
     session.execute(text(
         "CREATE INDEX IF NOT EXISTS ix_source_records_published_at ON source_records(published_at)"
     ))
+
+    # AI Push Report tables (lightweight CREATE IF NOT EXISTS)
+    for ddl in [
+        """CREATE TABLE IF NOT EXISTS ai_push_reports (
+            id INTEGER PRIMARY KEY,
+            title VARCHAR DEFAULT '',
+            status VARCHAR DEFAULT 'queued',
+            trigger_type VARCHAR DEFAULT 'startup',
+            rule_content TEXT DEFAULT '',
+            ai_content TEXT DEFAULT '',
+            final_content TEXT DEFAULT '',
+            prompt TEXT DEFAULT '',
+            context_json TEXT DEFAULT '',
+            content_hash VARCHAR DEFAULT '',
+            model VARCHAR DEFAULT '',
+            error TEXT DEFAULT '',
+            candidate_count INTEGER DEFAULT 0,
+            high_risk_count INTEGER DEFAULT 0,
+            new_high_risk_count INTEGER DEFAULT 0,
+            generated_at DATETIME,
+            optimized_at DATETIME,
+            created_at DATETIME,
+            updated_at DATETIME
+        )""",
+        """CREATE TABLE IF NOT EXISTS ai_push_report_items (
+            id INTEGER PRIMARY KEY,
+            report_id INTEGER,
+            vulnerability_id INTEGER,
+            vuln_key VARCHAR DEFAULT '',
+            title VARCHAR DEFAULT '',
+            disclosed_at DATETIME,
+            disclosed_source VARCHAR DEFAULT '',
+            action_value_score FLOAT DEFAULT 0,
+            cvss_score FLOAT,
+            is_kev BOOLEAN DEFAULT 0,
+            created_at DATETIME
+        )""",
+        """CREATE TABLE IF NOT EXISTS high_risk_alerts (
+            id INTEGER PRIMARY KEY,
+            vulnerability_id INTEGER UNIQUE,
+            first_report_id INTEGER,
+            latest_report_id INTEGER,
+            status VARCHAR DEFAULT 'unread',
+            first_alerted_at DATETIME,
+            last_alerted_at DATETIME,
+            read_at DATETIME
+        )""",
+        """CREATE TABLE IF NOT EXISTS personal_library_entries (
+            id INTEGER PRIMARY KEY,
+            entry_type VARCHAR DEFAULT 'ai_push_report',
+            report_id INTEGER,
+            vulnerability_id INTEGER,
+            title VARCHAR DEFAULT '',
+            note TEXT DEFAULT '',
+            tags VARCHAR DEFAULT '',
+            pinned BOOLEAN DEFAULT 0,
+            archived BOOLEAN DEFAULT 0,
+            created_at DATETIME,
+            updated_at DATETIME
+        )""",
+    ]:
+        session.execute(text(ddl))
+
     session.commit()
     logger.info("Schema migrations completed")
 

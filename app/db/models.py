@@ -156,3 +156,72 @@ class AIAnalysisHistory(SQLModel, table=True):
     protocol: str = Field(default="")
     model: str = Field(default="")
     created_at: datetime = Field(default_factory=_utcnow)
+
+
+class AIPushReport(SQLModel, table=True):
+    __tablename__ = "ai_push_reports"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    title: str = Field(default="")
+    status: str = Field(default="queued", index=True)
+    trigger_type: str = Field(default="startup", index=True)
+    rule_content: str = Field(default="")
+    ai_content: str = Field(default="")
+    final_content: str = Field(default="")
+    prompt: str = Field(default="")
+    context_json: str = Field(default="")
+    content_hash: str = Field(default="", index=True)
+    model: str = Field(default="")
+    error: str = Field(default="")
+    candidate_count: int = Field(default=0)
+    high_risk_count: int = Field(default=0)
+    new_high_risk_count: int = Field(default=0)
+    generated_at: Optional[datetime] = Field(default=None, index=True)
+    optimized_at: Optional[datetime] = Field(default=None)
+    created_at: datetime = Field(default_factory=_utcnow)
+    updated_at: datetime = Field(default_factory=_utcnow)
+
+
+class AIPushReportItem(SQLModel, table=True):
+    __tablename__ = "ai_push_report_items"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    report_id: int = Field(foreign_key="ai_push_reports.id", index=True)
+    vulnerability_id: int = Field(foreign_key="vulnerabilities.id", index=True)
+    vuln_key: str = Field(default="", index=True)
+    title: str = Field(default="")
+    disclosed_at: Optional[datetime] = Field(default=None, index=True)
+    disclosed_source: str = Field(default="")
+    action_value_score: float = Field(default=0.0)
+    cvss_score: Optional[float] = Field(default=None)
+    is_kev: bool = Field(default=False)
+    created_at: datetime = Field(default_factory=_utcnow)
+
+
+class HighRiskAlert(SQLModel, table=True):
+    __tablename__ = "high_risk_alerts"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    vulnerability_id: int = Field(foreign_key="vulnerabilities.id", index=True, unique=True)
+    first_report_id: Optional[int] = Field(default=None, foreign_key="ai_push_reports.id")
+    latest_report_id: Optional[int] = Field(default=None, foreign_key="ai_push_reports.id")
+    status: str = Field(default="unread", index=True)
+    first_alerted_at: datetime = Field(default_factory=_utcnow)
+    last_alerted_at: datetime = Field(default_factory=_utcnow)
+    read_at: Optional[datetime] = Field(default=None)
+
+
+class PersonalLibraryEntry(SQLModel, table=True):
+    __tablename__ = "personal_library_entries"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    entry_type: str = Field(default="ai_push_report", index=True)
+    report_id: Optional[int] = Field(default=None, foreign_key="ai_push_reports.id", index=True)
+    vulnerability_id: Optional[int] = Field(default=None, foreign_key="vulnerabilities.id", index=True)
+    title: str = Field(default="")
+    note: str = Field(default="")
+    tags: str = Field(default="")
+    pinned: bool = Field(default=False)
+    archived: bool = Field(default=False)
+    created_at: datetime = Field(default_factory=_utcnow)
+    updated_at: datetime = Field(default_factory=_utcnow)

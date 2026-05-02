@@ -100,6 +100,7 @@ def build_vuln_push_payload(session: Session, vuln: Vulnerability) -> dict:
         "has_patch": vuln.has_patch,
         "action_value_score": vuln.action_value_score,
         "disclosed_at": fmt_dt(vuln.disclosed_at or vuln.published_at or vuln.first_seen_at),
+        "disclosed_at_raw": vuln.disclosed_at or vuln.published_at or vuln.first_seen_at,
         "disclosed_source": vuln.disclosed_source or vuln.source or "未知",
         "published_at": fmt_dt(vuln.published_at),
         "modified_at": fmt_dt(vuln.modified_at),

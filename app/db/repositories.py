@@ -4,7 +4,9 @@ from sqlmodel import Session, select, func, col
 from app.db.models import (
     Vulnerability, AffectedProduct, VulnerabilityReference,
     SourceRecord, UserPreference, Notification, CollectorStatus,
-    VulnerabilityChange, AIAnalysisHistory, _utcnow,
+    VulnerabilityChange, AIAnalysisHistory,
+    AIPushReport, AIPushReportItem, HighRiskAlert, PersonalLibraryEntry,
+    _utcnow,
 )
 
 
@@ -474,3 +476,182 @@ def get_latest_ai_analysis(session: Session, vuln_id: int) -> Optional[AIAnalysi
         .order_by(AIAnalysisHistory.created_at.desc())
     )
     return session.exec(stmt).first()
+
+
+# ─── AI Push Report Repository ─────────────────────────────────────
+
+def create_ai_push_report(session: Session, trigger_type: str) -> AIPushReport:
+    report = AIPushReport(
+        title="AI推送：最新高危漏洞简报",
+        status="queued",
+        trigger_type=trigger_type,
+        created_at=_utcnow(),
+        updated_at=_utcnow(),
+    )
+    session.add(report)
+    session.commit()
+    session.refresh(report)
+    return report
+
+
+def save_ai_push_report_ready(
+    session: Session, report_id: int, *, rule_content: str,
+    ai_content: str, final_content: str, prompt: str,
+    context_json: str, content_hash: str, model: str,
+    candidate_count: int, high_risk_count: int,
+    new_high_risk_count: int, status: str,
+):
+    report = session.get(AIPushReport, report_id)
+    if not report:
+        return
+    report.rule_content = rule_content
+    report.ai_content = ai_content
+    report.final_content = final_content
+    report.prompt = prompt
+    report.context_json = context_json
+    report.content_hash = content_hash
+    report.model = model
+    report.candidate_count = candidate_count
+    report.high_risk_count = high_risk_count
+    report.new_high_risk_count = new_high_risk_count
+    report.status = status
+    report.generated_at = report.generated_at or _utcnow()
+    if status == "ready_ai":
+        report.optimized_at = _utcnow()
+    report.updated_at = _utcnow()
+    session.add(report)
+    session.commit()
+
+
+def add_ai_push_report_items(session: Session, report_id: int, items: list[dict]):
+    for item in items:
+        vid = item.get("id")
+        if not vid:
+            continue
+        row = AIPushReportItem(
+            report_id=report_id,
+            vulnerability_id=vid,
+            vuln_key=item.get("key", ""),
+            title=item.get("title", ""),
+            disclosed_at=item.get("disclosed_at_raw"),
+            disclosed_source=item.get("disclosed_source", ""),
+            action_value_score=item.get("action_value_score") or 0,
+            cvss_score=item.get("cvss_score"),
+            is_kev=bool(item.get("is_kev")),
+            created_at=_utcnow(),
+        )
+        session.add(row)
+    session.commit()
+
+
+def upsert_high_risk_alerts(session: Session, report_id: int, items: list[dict]) -> int:
+    new_count = 0
+    for item in items:
+        vid = item.get("id")
+        if not vid:
+            continue
+        existing = session.exec(
+            select(HighRiskAlert).where(HighRiskAlert.vulnerability_id == vid)
+        ).first()
+        if existing:
+            existing.latest_report_id = report_id
+            existing.last_alerted_at = _utcnow()
+            session.add(existing)
+        else:
+            session.add(HighRiskAlert(
+                vulnerability_id=vid,
+                first_report_id=report_id,
+                latest_report_id=report_id,
+                status="unread",
+                first_alerted_at=_utcnow(),
+                last_alerted_at=_utcnow(),
+            ))
+            new_count += 1
+    session.commit()
+    return new_count
+
+
+def count_unread_high_risk_alerts(session: Session) -> int:
+    return session.exec(
+        select(func.count(HighRiskAlert.id)).where(HighRiskAlert.status == "unread")
+    ).one()
+
+
+def mark_report_alerts_read(session: Session, report_id: int):
+    item_vuln_ids = session.exec(
+        select(AIPushReportItem.vulnerability_id).where(AIPushReportItem.report_id == report_id)
+    ).all()
+    if not item_vuln_ids:
+        return
+    alerts = session.exec(
+        select(HighRiskAlert).where(HighRiskAlert.vulnerability_id.in_(item_vuln_ids))
+    ).all()
+    now = _utcnow()
+    for a in alerts:
+        a.status = "read"
+        a.read_at = now
+        session.add(a)
+    session.commit()
+
+
+def get_latest_ready_ai_push_report(session: Session) -> Optional[AIPushReport]:
+    return session.exec(
+        select(AIPushReport)
+        .where(AIPushReport.status.in_(["ready_rule", "ready_ai"]))
+        .order_by(AIPushReport.updated_at.desc())
+        .limit(1)
+    ).first()
+
+
+def get_latest_ai_push_report(session: Session) -> Optional[AIPushReport]:
+    return session.exec(
+        select(AIPushReport).order_by(AIPushReport.updated_at.desc()).limit(1)
+    ).first()
+
+
+def count_unalerted_high_risk_candidates(
+    session: Session, days: int = 14, min_score: float = 70.0
+) -> int:
+    from datetime import timedelta
+    from sqlalchemy import func as sa_func
+    eff = sa_func.coalesce(Vulnerability.disclosed_at, Vulnerability.published_at,
+                            Vulnerability.first_seen_at)
+    cutoff = _utcnow() - timedelta(days=days)
+    already = session.exec(select(HighRiskAlert.vulnerability_id)).all()
+    already_ids = {r for r in already if r}
+    stmt = (
+        select(func.count(Vulnerability.id))
+        .where(Vulnerability.status != "ignored")
+        .where(eff >= cutoff)
+        .where(
+            (Vulnerability.action_value_score >= min_score) |
+            (Vulnerability.cvss_score >= 8.0) |
+            (Vulnerability.is_kev == True) |
+            (Vulnerability.epss_percentile >= 0.9)
+        )
+    )
+    if already_ids:
+        stmt = stmt.where(~Vulnerability.id.in_(already_ids))
+    return session.exec(stmt).one()
+
+
+def add_personal_library_report_entry(
+    session: Session, report_id: int, title: str
+):
+    session.add(PersonalLibraryEntry(
+        entry_type="ai_push_report",
+        report_id=report_id,
+        title=title,
+        created_at=_utcnow(),
+        updated_at=_utcnow(),
+    ))
+    session.commit()
+
+
+def get_personal_library_entries(
+    session: Session, entry_type: str | None = None
+) -> list[PersonalLibraryEntry]:
+    stmt = select(PersonalLibraryEntry).where(PersonalLibraryEntry.archived == False)
+    if entry_type:
+        stmt = stmt.where(PersonalLibraryEntry.entry_type == entry_type)
+    return list(session.exec(stmt.order_by(PersonalLibraryEntry.created_at.desc())).all())

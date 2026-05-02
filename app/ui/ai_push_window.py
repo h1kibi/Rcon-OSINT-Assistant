@@ -48,118 +48,98 @@ class AIPushWorker(QThread):
         return data["choices"][0]["message"]["content"]
 
 
+STYLE = """
+QDialog {
+    background: #0d1117; font-family: 'Microsoft YaHei';
+}
+QLabel#statusLabel {
+    color: #58a6ff; font-size: 13px; font-family: 'Microsoft YaHei';
+}
+QTextBrowser {
+    background: #0d1117; color: #c9d1d9;
+    border: 1px solid #1c2940; border-radius: 8px;
+    font-size: 13px; font-family: 'Microsoft YaHei', Consolas;
+    padding: 12px;
+}
+QPushButton {
+    background: #21262d; color: #c9d1d9;
+    border: 1px solid #30363d; border-radius: 6px;
+    padding: 6px 16px; font-size: 12px;
+}
+QPushButton:hover { background: #30363d; border-color: #58a6ff; }
+"""
+
+
 class AIPushWindow(QDialog):
-    def __init__(self, session_factory, config, parent=None):
-        super().__init__(parent)
-        self.session_factory = session_factory
-        self.config = config
-        self._worker = None
+    @classmethod
+    def waiting(cls, parent=None):
+        win = cls.__new__(cls)
+        QDialog.__init__(win, parent)
+        win.setStyleSheet(STYLE)
+        win.setWindowTitle("AI推送 — 生成中")
+        win.resize(640, 320)
+        layout = QVBoxLayout(win)
+        status = QLabel("AI推送正在生成并优化，请稍作等待...")
+        status.setObjectName("statusLabel")
+        layout.addWidget(status)
+        browser = QTextBrowser()
+        browser.setMarkdown("## 请稍作等待\n\nAI 推送文本正在后台生成并优化，完成后会自动保存到个人库。")
+        layout.addWidget(browser)
+        btn = QPushButton("关闭")
+        btn.clicked.connect(win.close)
+        layout.addWidget(btn, alignment=Qt.AlignRight)
+        return win
 
-        self.setWindowTitle("AI推送 — 高危漏洞简报")
-        self.resize(780, 660)
+    @classmethod
+    def from_report(cls, session_factory, report_id: int, parent=None):
+        from app.db.models import AIPushReport
+        win = cls.__new__(cls)
+        QDialog.__init__(win, parent)
+        win.setStyleSheet(STYLE)
+        win.setWindowTitle("AI推送 — 高危漏洞简报")
+        win.resize(780, 660)
 
-        layout = QVBoxLayout(self)
-        layout.setSpacing(8)
-
-        self.status = QLabel("正在生成推送...")
-        self.status.setStyleSheet("color:#58a6ff; font-size:13px; font-family:'Microsoft YaHei';")
-        layout.addWidget(self.status)
-
-        self.browser = QTextBrowser()
-        self.browser.setOpenExternalLinks(True)
-        self.browser.setStyleSheet("""
-            QTextBrowser {
-                background: #0d1117; color: #c9d1d9;
-                border: 1px solid #1c2940; border-radius: 8px;
-                font-size: 13px; font-family: 'Microsoft YaHei', Consolas;
-                padding: 12px;
-            }
-        """)
-        layout.addWidget(self.browser)
-
-        btns = QHBoxLayout()
-        self.btn_copy = QPushButton("复制")
-        self.btn_refresh = QPushButton("重新生成")
-        self.btn_close = QPushButton("关闭")
-        for b in [self.btn_copy, self.btn_refresh, self.btn_close]:
-            b.setStyleSheet("""
-                QPushButton {
-                    background: #21262d; color: #c9d1d9;
-                    border: 1px solid #30363d; border-radius: 6px;
-                    padding: 6px 16px; font-size: 12px;
-                }
-                QPushButton:hover { background: #30363d; border-color: #58a6ff; }
-            """)
-        btns.addWidget(self.btn_copy)
-        btns.addWidget(self.btn_refresh)
-        btns.addStretch()
-        btns.addWidget(self.btn_close)
-        layout.addLayout(btns)
-
-        self.btn_copy.clicked.connect(self._copy)
-        self.btn_refresh.clicked.connect(self.load_push)
-        self.btn_close.clicked.connect(self.close)
-
-        self.load_push()
-
-    def load_push(self):
-        if self._worker and self._worker.isRunning():
-            self.status.setText("AI 正在生成中，请稍候...")
-            return
-
+        session = session_factory()
         try:
-            from app.services.ai_push_service import (
-                get_ai_push_candidates,
-                build_vuln_push_payload,
-                build_rule_based_push,
-                build_ai_push_prompt,
-            )
+            rpt = session.get(AIPushReport, report_id)
+            title = rpt.title if rpt else "报告"
+            content = (rpt.final_content or rpt.rule_content) if rpt else "报告数据不可用"
+            gen_time = str(rpt.optimized_at or rpt.generated_at or "")[:19] if rpt else ""
+        finally:
+            session.close()
 
-            session = self.session_factory()
-            try:
-                candidates = get_ai_push_candidates(session, limit=5, days=14)
-                items = [build_vuln_push_payload(session, v) for v in candidates]
-            finally:
-                session.close()
+        layout = QVBoxLayout(win)
+        layout.setSpacing(8)
+        status = QLabel(f"生成时间：{gen_time}")
+        status.setObjectName("statusLabel")
+        layout.addWidget(status)
+        browser = QTextBrowser()
+        browser.setOpenExternalLinks(True)
+        browser.setMarkdown(content)
+        layout.addWidget(browser)
+        btns = QHBoxLayout()
+        btn_copy = QPushButton("复制")
+        btn_copy.clicked.connect(lambda: QApplication.clipboard().setText(browser.toMarkdown()))
+        btn_close = QPushButton("关闭")
+        btn_close.clicked.connect(win.close)
+        btns.addWidget(btn_copy)
+        btns.addStretch()
+        btns.addWidget(btn_close)
+        layout.addLayout(btns)
+        return win
 
-            rule_md = build_rule_based_push(items)
-            self.browser.setMarkdown(rule_md)
-
-            if items:
-                self.status.setText(f"已生成推送：{len(items)} 个漏洞")
-            else:
-                self.status.setText("暂无符合条件的高危漏洞")
-                return
-
-            agent_cfg = getattr(self.config, "agent", None)
-            if agent_cfg and getattr(agent_cfg, "api_key", ""):
-                prompt = build_ai_push_prompt(items)
-                self.status.setText("正在调用 AI 优化推送...")
-                self._start_ai_worker(prompt, agent_cfg)
-
-        except Exception as e:
-            logger.exception("AI push load failed")
-            self.status.setText(f"加载失败: {type(e).__name__}")
-
-    def _start_ai_worker(self, prompt, agent_cfg):
-        if self._worker and self._worker.isRunning():
-            self.status.setText("AI 正在生成中，请稍候...")
-            return
-
-        self.btn_refresh.setEnabled(False)
-        self._worker = AIPushWorker(agent_cfg, prompt, self)
-        self._worker.response_ready.connect(self._on_ai_ok)
-        self._worker.error_occurred.connect(self._on_ai_err)
-        self._worker.finished.connect(lambda: self.btn_refresh.setEnabled(True))
-        self._worker.start()
-
-    def _on_ai_ok(self, text):
-        self.browser.setMarkdown(text)
-        self.status.setText("AI推送已生成")
-
-    def _on_ai_err(self, err):
-        self.status.setText(f"AI生成失败，已保留规则推送")
-
-    def _copy(self):
-        QApplication.clipboard().setText(self.browser.toMarkdown())
-        self.status.setText("已复制到剪贴板")
+    @classmethod
+    def message(cls, title: str, body: str, parent=None):
+        win = cls.__new__(cls)
+        QDialog.__init__(win, parent)
+        win.setStyleSheet(STYLE)
+        win.setWindowTitle(title)
+        win.resize(500, 280)
+        layout = QVBoxLayout(win)
+        browser = QTextBrowser()
+        browser.setMarkdown(f"# {title}\n\n{body}")
+        layout.addWidget(browser)
+        btn = QPushButton("关闭")
+        btn.clicked.connect(win.close)
+        layout.addWidget(btn, alignment=Qt.AlignRight)
+        return win

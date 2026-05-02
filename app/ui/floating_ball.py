@@ -28,6 +28,7 @@ class RobotOrb(QWidget):
 
         self._min_score = min_score
         self._unread_count = 0
+        self._ai_alert_count = 0
         self._paused = False
         self._hovered = False
         self._dragging = False
@@ -54,6 +55,10 @@ class RobotOrb(QWidget):
 
     def set_unread_count(self, count: int):
         self._unread_count = count
+        self.update()
+
+    def set_ai_alert_count(self, count: int):
+        self._ai_alert_count = max(0, int(count))
         self.update()
 
     def set_paused(self, paused: bool):
@@ -256,7 +261,7 @@ class RobotOrb(QWidget):
                        int(cx + dx + 4), int(cy - hh * 0.7))
 
         # ── Badge ───────────────────────────────────────────────
-        if self._unread_count > 0 and not self._paused:
+        if not self._paused and (self._ai_alert_count > 0 or self._unread_count > 0):
             self._draw_badge(p, cx + hs - 2, cy - hs + 2)
 
         p.end()
@@ -293,7 +298,10 @@ class RobotOrb(QWidget):
         font = QFont("Consolas", 8)
         font.setBold(True)
         p.setFont(font)
-        txt = str(self._unread_count) if self._unread_count <= 99 else "99+"
+        if self._ai_alert_count > 0:
+            txt = "!" * min(self._ai_alert_count, 3)
+        else:
+            txt = str(self._unread_count) if self._unread_count <= 99 else "99+"
         p.drawText(int(bx - r), int(by - r * 0.5), r * 2, r, Qt.AlignCenter, txt)
 
     # ── Mouse Events ────────────────────────────────────────────
