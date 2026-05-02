@@ -1,0 +1,182 @@
+"""AI Push Service: query candidates, build payloads, generate prompts."""
+
+import json
+from datetime import timedelta
+from sqlalchemy import or_, func
+from sqlmodel import Session, select
+from app.db.models import Vulnerability, _utcnow
+from app.db import repositories as repo
+
+
+def get_ai_push_candidates(
+    session: Session,
+    limit: int = 5,
+    days: int = 14,
+    min_score: float = 70.0,
+) -> list[Vulnerability]:
+    """Get latest high-risk vulnerabilities for AI push briefing."""
+    effective_date = func.coalesce(
+        Vulnerability.disclosed_at,
+        Vulnerability.published_at,
+        Vulnerability.first_seen_at,
+    )
+    cutoff = _utcnow() - timedelta(days=days)
+
+    stmt = (
+        select(Vulnerability)
+        .where(Vulnerability.status != "ignored")
+        .where(effective_date >= cutoff)
+        .where(
+            or_(
+                Vulnerability.action_value_score >= min_score,
+                Vulnerability.cvss_score >= 8.0,
+                Vulnerability.is_kev == True,  # noqa: E712
+                Vulnerability.epss_percentile >= 0.9,
+            )
+        )
+        .order_by(
+            Vulnerability.is_kev.desc(),
+            effective_date.desc(),
+            Vulnerability.action_value_score.desc(),
+            Vulnerability.cvss_score.desc(),
+        )
+        .limit(limit)
+    )
+    return list(session.exec(stmt).all())
+
+
+def fmt_dt(dt) -> str:
+    if not dt:
+        return "未知"
+    text = str(dt).replace("T", " ").replace("Z", " UTC")
+    if "UTC" not in text:
+        text += " UTC"
+    return text
+
+
+def format_product_range(p) -> str:
+    name = getattr(p, "product", None) or getattr(p, "package_name", None) or getattr(p, "cpe", None) or "未知产品"
+    if isinstance(p, dict):
+        vendor = p.get("vendor", "")
+        ecosystem = p.get("package_ecosystem", "")
+        v_start = p.get("version_start")
+        v_end = p.get("version_end")
+        fixed = p.get("fixed_version")
+        name = p.get("product") or p.get("package_name") or p.get("cpe") or "未知产品"
+    else:
+        vendor = getattr(p, "vendor", "")
+        ecosystem = getattr(p, "package_ecosystem", "")
+        v_start = getattr(p, "version_start", None)
+        v_end = getattr(p, "version_end", None)
+        fixed = getattr(p, "fixed_version", None)
+
+    range_parts = []
+    if v_start:
+        range_parts.append(f">= {v_start}")
+    if v_end:
+        range_parts.append(f"< {v_end}")
+    if not range_parts:
+        range_parts.append("版本范围未结构化提供")
+
+    fixed_str = f"，修复版本：{fixed}" if fixed else ""
+    prefix = " / ".join(x for x in [vendor, ecosystem, name] if x)
+    return f"{prefix}: {' 且 '.join(range_parts)}{fixed_str}"
+
+
+def build_vuln_push_payload(session: Session, vuln: Vulnerability) -> dict:
+    products = (repo.get_affected_products(session, vuln.id) if vuln.id else None) or []
+    refs = (repo.get_references(session, vuln.id) if vuln.id else None) or []
+    source_records = (repo.get_source_records(session, vuln.id) if vuln.id else None) or []
+
+    return {
+        "id": vuln.id,
+        "key": vuln.cve_id or vuln.ghsa_id or vuln.osv_id or vuln.primary_key_id,
+        "title": vuln.title,
+        "severity": vuln.severity,
+        "cvss_score": vuln.cvss_score,
+        "epss_percentile": vuln.epss_percentile,
+        "is_kev": vuln.is_kev,
+        "has_poc_signal": vuln.has_poc_signal,
+        "has_patch": vuln.has_patch,
+        "action_value_score": vuln.action_value_score,
+        "disclosed_at": fmt_dt(vuln.disclosed_at or vuln.published_at or vuln.first_seen_at),
+        "disclosed_source": vuln.disclosed_source or vuln.source or "未知",
+        "published_at": fmt_dt(vuln.published_at),
+        "modified_at": fmt_dt(vuln.modified_at),
+        "description": vuln.description[:1500] if vuln.description else "",
+        "affected_products": [format_product_range(p) for p in products],
+        "source_timeline": [
+            {
+                "source": sr.source,
+                "published_at": fmt_dt(sr.published_at),
+                "modified_at": fmt_dt(sr.modified_at),
+                "fetched_at": fmt_dt(sr.fetched_at),
+                "url": sr.url or "",
+                "title": sr.title or "",
+            }
+            for sr in source_records
+        ],
+        "references": [r.url for r in refs if getattr(r, "url", "")][:8],
+    }
+
+
+def build_rule_based_push(items: list[dict]) -> str:
+    if not items:
+        return "# AI推送\n\n暂无符合条件的最新高危漏洞。"
+
+    blocks = ["# AI推送：最新高危漏洞简报\n"]
+    for idx, v in enumerate(items, 1):
+        products = v["affected_products"] or ["数据源未提供结构化影响产品或版本范围"]
+        refs = v["references"] or []
+
+        if v["has_patch"]:
+            fix = "优先升级到官方修复版本；若版本范围中给出 fixed_version，请以 fixed_version 为最低修复版本。"
+        else:
+            fix = "暂未发现结构化补丁信息；建议立即查看厂商公告，采取临时缓解、限制暴露面、加强监控。"
+        if v["is_kev"]:
+            fix += " 该漏洞属于 KEV 已知利用风险，应提高处置优先级。"
+
+        block = f"""
+## {idx}. {v['key']} — {v['title']}
+
+- 严重性：{v['severity']}，CVSS: {v['cvss_score'] or '未知'}，处置评分: {v['action_value_score']:.1f}
+- 情报发布时间：{v['disclosed_at']}
+- 时间来源：{v['disclosed_source']}
+- 最后更新时间：{v['modified_at']}
+- KEV：{'是' if v['is_kev'] else '否'}
+- PoC/利用信号：{'有' if v['has_poc_signal'] else '未发现'}
+
+### 影响产品及版本范围
+{chr(10).join(f'- {p}' for p in products)}
+
+### 修复建议
+- {fix}
+- 核查资产中是否存在上述产品和版本。
+- 对公网暴露资产优先处置。
+- 若无法立即升级，先做访问控制、WAF/IPS 规则、日志监控和异常行为告警。
+
+### 参考链接
+{chr(10).join(f'- {u}' for u in refs[:5]) if refs else '- 暂无结构化参考链接'}
+"""
+        blocks.append(block)
+    return "\n".join(blocks)
+
+
+def build_ai_push_prompt(items: list[dict]) -> str:
+    data = json.dumps(items, ensure_ascii=False, indent=2)
+    return f"""
+你是漏洞情报推送助手。请基于下面的本地漏洞数据库 JSON 生成中文安全情报推送。
+
+硬性要求：
+1. 只使用 JSON 中提供的信息，不得编造影响版本、修复版本、发布时间。
+2. 每个漏洞必须包含：
+   - 情报发布时间：使用 disclosed_at，并说明 disclosed_source。
+   - 影响产品及版本范围：使用 affected_products；如果为空，明确写"数据源未提供结构化影响版本范围"。
+   - 修复建议：如果 has_patch=true 或 affected_products 中有 fixed_version，说明升级建议；否则给出缓解建议。
+3. 优先介绍最新且高危的漏洞。
+4. 输出 Markdown。
+5. 每个漏洞控制在 180-260 字。
+
+漏洞数据：
+{data}
+"""

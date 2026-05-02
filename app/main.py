@@ -31,6 +31,7 @@ from app.collectors.cnnvd import CNNVDCollector
 from app.collectors.cn_vendor import ChineseVendorCollector
 from app.ui.floating_ball import RobotOrb
 from app.ui.main_window import MainWindow
+from app.ui.ai_push_window import AIPushWindow
 
 
 class SyncSignals(QObject):
@@ -557,6 +558,7 @@ def main():
     )
     floating_ball.refresh_now.connect(sync_func)
     floating_ball.open_settings.connect(main_window._open_settings)
+    floating_ball.ai_push_requested.connect(lambda: _open_ai_push())
 
     main_window.refresh_requested.connect(sync_func)
     main_window.rescore_requested.connect(
@@ -624,6 +626,20 @@ def _rescore_all(settings, scorer_config):
         logger.error(f"Rescore failed: {e}")
     finally:
         session.close()
+
+
+def _open_ai_push():
+    try:
+        win = AIPushWindow(
+            session_factory=get_session,
+            config=get_settings(),
+            parent=main_window,
+        )
+        win.show()
+        win.raise_()
+        win.activateWindow()
+    except Exception as e:
+        logger.exception("Open AI push failed")
 
 
 def _toggle_pause(ball, scheduler):

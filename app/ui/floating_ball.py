@@ -5,7 +5,7 @@ from PySide6.QtGui import (
     QPainter, QColor, QBrush, QPen, QFont, QRadialGradient,
     QLinearGradient, QPainterPath, QPolygon
 )
-from PySide6.QtWidgets import QWidget, QMenu, QApplication
+from PySide6.QtWidgets import QWidget, QMenu, QApplication, QAction
 
 
 class RobotOrb(QWidget):
@@ -15,6 +15,7 @@ class RobotOrb(QWidget):
     refresh_now = Signal()
     toggle_pause = Signal()
     open_settings = Signal()
+    ai_push_requested = Signal()
     quit_app = Signal()
 
     def __init__(self, parent=None, min_score: int = 70):
@@ -336,6 +337,7 @@ class RobotOrb(QWidget):
         items = [
             ("打开面板", self.open_main),
             ("立即同步", self.refresh_now),
+            ("AI推送", self.ai_push_requested),
             ("恢复采集" if self._paused else "暂停采集", self.toggle_pause),
             None,
             ("设置", self.open_settings),
