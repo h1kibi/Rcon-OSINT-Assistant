@@ -155,7 +155,7 @@ class MainWindow(QMainWindow):
         super().__init__(parent)
         self.db = db_session_factory
         self.config = config
-        self.setWindowTitle("Rcon // 漏洞情报中心")
+        self.setWindowTitle("Rcon")
         self.setMinimumSize(1050, 580)
         self.resize(1250, 680)
 
