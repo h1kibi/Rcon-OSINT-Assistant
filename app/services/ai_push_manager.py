@@ -141,7 +141,7 @@ class AIPushManager(QObject):
                 try:
                     repo.mark_ai_push_report_error(session, report_id, f"{type(e).__name__}: {e}")
                 except Exception:
-                    pass
+                    logger.exception("Failed to mark AI push report error")
             self._status = "idle"
             self.generation_failed.emit(str(e))
         finally:
@@ -171,10 +171,18 @@ class AIPushManager(QObject):
                 new_high_risk_count=new_count, status="ready_ai",
             )
             repo.add_personal_library_report_entry(session, report_id, "AI推送：最新高危漏洞简报")
-            self._status = "idle"
             self.report_ready.emit(report_id)
             self._emit_alert_count(session)
+        except Exception as e:
+            logger.exception("Failed to save AI push result")
+            try:
+                repo.mark_ai_push_report_error(session, report_id,
+                                               f"Save AI result failed: {type(e).__name__}: {e}")
+            except Exception:
+                logger.exception("Failed to mark AI push report error")
+            self.generation_failed.emit(str(e))
         finally:
+            self._status = "idle"
             session.close()
 
     def _on_ai_err(self, report_id, err, rule_md, prompt, context_json, items, new_count):
@@ -190,10 +198,18 @@ class AIPushManager(QObject):
                 error=f"AI optimization failed: {err}",
             )
             repo.add_personal_library_report_entry(session, report_id, "AI推送：最新高危漏洞简报")
-            self._status = "idle"
             self.report_ready.emit(report_id)
             self._emit_alert_count(session)
+        except Exception as e:
+            logger.exception("Failed to save AI push rule fallback")
+            try:
+                repo.mark_ai_push_report_error(session, report_id,
+                                               f"Rule fallback failed: {type(e).__name__}: {e}")
+            except Exception:
+                logger.exception("Failed to mark AI push report error")
+            self.generation_failed.emit(str(e))
         finally:
+            self._status = "idle"
             session.close()
 
     def _emit_alert_count(self, session):
