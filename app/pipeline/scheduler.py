@@ -2,6 +2,7 @@ from datetime import datetime
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 from apscheduler.schedulers.base import SchedulerNotRunningError
+from apscheduler.jobstores.base import JobLookupError
 from loguru import logger
 
 
@@ -65,18 +66,31 @@ class SyncScheduler:
         logger.info("Sync resumed")
 
     def update_interval(self, interval_minutes: int):
-        """Update the scheduler interval in-place."""
-        self.interval_minutes = interval_minutes
+        """Update the scheduler interval in-place. Atomic: only updates attr on success."""
         if not self._is_running:
+            self.interval_minutes = interval_minutes
             return
+
         try:
             self.scheduler.reschedule_job(
                 "sync_job",
                 trigger=IntervalTrigger(minutes=interval_minutes),
             )
-            logger.info(f"Scheduler interval updated: {interval_minutes}min")
+        except JobLookupError:
+            logger.warning("sync_job not found; recreating")
+            self.scheduler.add_job(
+                self._run,
+                IntervalTrigger(minutes=interval_minutes),
+                id="sync_job",
+                name="Vulnerability Sync",
+                replace_existing=True,
+            )
         except Exception as e:
-            logger.warning(f"Failed to reschedule sync job: {e}")
+            logger.warning(f"Failed to reschedule sync job: {type(e).__name__}")
+            return
+
+        self.interval_minutes = interval_minutes
+        logger.info(f"Scheduler interval updated: {interval_minutes}min")
 
     def shutdown(self):
         """Idempotent shutdown, safe to call multiple times."""

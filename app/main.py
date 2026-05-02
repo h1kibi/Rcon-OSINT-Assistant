@@ -442,21 +442,32 @@ def main():
     sync_signals.sync_done.connect(main_window.load_data)
     sync_signals.sync_done.connect(update_badge)
 
-    # Lock guards: sync execution vs collector replacement
     sync_lock = threading.Lock()
+    sync_pending = [False]
 
     def run_sync_locked():
-        with sync_lock:
+        if not sync_lock.acquire(blocking=False):
+            sync_pending[0] = True
+            logger.info("Sync already running; marked one pending")
+            return
+        try:
             _run_sync(get_settings(), get_collectors(), get_epss(), get_scorer())
+        finally:
+            sync_lock.release()
+            if sync_pending[0]:
+                sync_pending[0] = False
+                QTimer.singleShot(200, sync_func)
 
     def sync_func():
         main_window.load_data()
         update_badge()
+
         def _worker():
             try:
                 run_sync_locked()
             finally:
                 sync_signals.sync_done.emit()
+
         threading.Thread(target=_worker, daemon=True).start()
 
     def sync_scheduler_recreate():
@@ -467,7 +478,6 @@ def main():
 
     sync_scheduler = sync_scheduler_recreate()
 
-    # Connect config hot-reload
     def close_collectors(c, e):
         for v in c.values():
             if hasattr(v, "http"):
@@ -475,36 +485,67 @@ def main():
         if e and hasattr(e, "http"):
             e.http.close()
 
-    def on_config_changed(new_config):
-        with sync_lock:
-            close_collectors(_collectors_ref[0], _epss_ref[0])
+    def apply_config_change(new_config):
+        """Apply config change - caller must hold sync_lock."""
+        nonlocal sync_scheduler
 
-            from app.utils.http import set_global_proxy
-            set_global_proxy(
-                http_proxy=new_config.proxy.http_proxy,
-                https_proxy=new_config.proxy.https_proxy,
-                enabled=new_config.proxy.enabled,
-            )
+        close_collectors(_collectors_ref[0], _epss_ref[0])
 
-            _settings_ref[0] = new_config
-            _scorer_ref[0] = build_scorer(new_config)
-            _collectors_ref[0], _epss_ref[0] = build_collectors(new_config)
+        from app.utils.http import set_global_proxy
+        set_global_proxy(
+            http_proxy=new_config.proxy.http_proxy,
+            https_proxy=new_config.proxy.https_proxy,
+            enabled=new_config.proxy.enabled,
+        )
 
-            floating_ball._min_score = new_config.ui.min_score_to_badge
+        _settings_ref[0] = new_config
+        _scorer_ref[0] = build_scorer(new_config)
+        _collectors_ref[0], _epss_ref[0] = build_collectors(new_config)
 
-            # Handle scheduler lifecycle
-            has_sources = bool(get_collectors())
-            if has_sources and not sync_scheduler.is_running:
-                sync_scheduler.start(run_immediately=False)
-                logger.info("Scheduler auto-started from config hot-reload")
-            elif not has_sources and sync_scheduler.is_running:
+        floating_ball._min_score = new_config.ui.min_score_to_badge
+
+        has_sources = bool(get_collectors())
+        if not has_sources:
+            if sync_scheduler.is_running:
                 sync_scheduler.shutdown()
-                logger.info("Scheduler auto-stopped (no sources enabled)")
-            else:
-                sync_scheduler.update_interval(new_config.app.refresh_interval_minutes)
+            return
 
-        # Post-lock: force a sync so new collectors are tested immediately
+        if sync_scheduler.is_running:
+            sync_scheduler.update_interval(new_config.app.refresh_interval_minutes)
+        else:
+            # Recreate fresh scheduler with new interval
+            sync_scheduler = sync_scheduler_recreate()
+            sync_scheduler.start(run_immediately=False)
+            logger.info("Scheduler recreated and auto-started from config change")
+
+        # Force sync with new collectors
         QTimer.singleShot(1500, sync_func)
+
+    # Pending config for deferred application (sync running → wait)
+    _pending_config = [None]
+
+    def on_config_changed(new_config):
+        if sync_lock.locked():
+            _pending_config[0] = new_config
+            logger.info("Sync in progress; config deferred to post-sync")
+            return
+
+        if sync_lock.acquire(blocking=False):
+            try:
+                apply_config_change(new_config)
+            finally:
+                sync_lock.release()
+        else:
+            _pending_config[0] = new_config
+
+    # Check pending config after each sync
+    def _check_pending():
+        cfg = _pending_config[0]
+        if cfg is not None:
+            _pending_config[0] = None
+            on_config_changed(cfg)
+
+    sync_signals.sync_done.connect(_check_pending)
 
     main_window.config_changed.connect(on_config_changed)
 
