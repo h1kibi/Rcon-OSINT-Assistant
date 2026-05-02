@@ -7,6 +7,8 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtGui import QFont
 
+from app.ui.fonts import pixel_font, mono_font
+
 
 def render_markdown(widget, text: str):
     text = text or ""
@@ -40,10 +42,11 @@ class ChatMessageWidget(QFrame):
         outer.setContentsMargins(28, 6, 28, 6)
         outer.setSpacing(10)
 
-        self.avatar = QLabel("R" if role == "assistant" else "你")
-        self.avatar.setFixedSize(30, 30)
+        self.avatar = QLabel("AI" if role == "assistant" else "YOU")
+        self.avatar.setFixedSize(36, 22)
         self.avatar.setAlignment(Qt.AlignCenter)
         self.avatar.setObjectName("assistantAvatar" if role == "assistant" else "userAvatar")
+        self.avatar.setFont(pixel_font(8, bold=True))
 
         self.bubble = QFrame()
         self.bubble.setObjectName("assistantBubble" if role == "assistant" else "userBubble")
@@ -59,7 +62,7 @@ class ChatMessageWidget(QFrame):
         self.body.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.body.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.body.setObjectName("messageBody")
-        self.body.setFont(QFont("Microsoft YaHei", 10))
+        self.body.setFont(mono_font(10))
         self.body.setMinimumHeight(36)
         bubble_l.addWidget(self.body)
 

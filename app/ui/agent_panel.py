@@ -16,287 +16,264 @@ from app.ui.chat_animations import animate_message_in, smooth_scroll_to_bottom, 
 from app.services.agent_tools import AgentToolService
 from app.services.agent_service import AgentService
 from app.services.agent_worker import AgentWorker
+from app.ui.fonts import pixel_font, mono_font, text_font
 
 CENTER_MAX_WIDTH = 1040
 COMPOSER_MAX_WIDTH = 980
 
-# ─── Colors ───────────────────────────────────────────────────────────
-C = {
-    "bg":        "#080b11",
-    "surface":   "rgba(17, 24, 39, 0.96)",
-    "border":    "rgba(148, 163, 184, 0.12)",
-    "border_f":  "rgba(96, 165, 250, 0.55)",
-    "blue":      "#3b82f6",
-    "blue2":     "#2563eb",
-    "text":      "#e5e7eb",
-    "text2":     "#9ca3af",
-    "text3":     "#7f8da3",
-    "white":     "#f9fafb",
+AGENT_STYLE = """
+QWidget#agentPanel {
+    background: #050805;
+    color: #c9ffd1;
 }
 
-AGENT_STYLE = f"""
-QWidget#agentPanel {{
-    background: {C['bg']};
-    color: {C['text']};
-    font-family: "Microsoft YaHei", "Inter", "Segoe UI";
-}}
+QFrame#agentTopBar {
+    background: #070b07;
+    border-bottom: 1px solid #143d1f;
+}
 
-QFrame#agentTopBar {{
-    background: #0b0f17;
-    border-bottom: 1px solid {C['border']};
-}}
+QLabel#agentTitle {
+    color: #b7ffb7;
+    font-size: 15px;
+    font-weight: 700;
+}
 
-QLabel#agentTitle {{
-    color: #f9fafb;
-    font-size: 16px;
-    font-weight: 800;
-}}
-
-QLabel#agentSubtitle {{
-    color: {C['text3']};
+QLabel#agentSubtitle {
+    color: #6da87a;
     font-size: 12px;
-}}
+}
 
-QWidget#agentPanel QFrame#assistantBubble {{
-    background: #111827;
-    border: 1px solid rgba(148, 163, 184, 0.12);
-    border-radius: 18px;
-}}
+QWidget#agentPanel QFrame#assistantBubble {
+    background: #081008;
+    border: 1px solid #143d1f;
+    border-radius: 4px;
+}
 
-QWidget#agentPanel QFrame#userBubble {{
-    background: qlineargradient(x1:0,y1:0,x2:1,y2:1,
-        stop:0 {C['blue2']}, stop:1 #7c3aed);
-    border: none;
-    border-radius: 18px;
-}}
+QWidget#agentPanel QFrame#userBubble {
+    background: #102010;
+    border: 1px solid #2aff66;
+    border-radius: 4px;
+}
 
-QWidget#agentPanel QLabel#userAvatar {{
-    color: {C['bg']};
-    background: {C['text']};
-    border-radius: 15px;
-    font-weight: 800;
-}}
+QWidget#agentPanel QLabel#userAvatar {
+    color: #051005;
+    background: #39ff14;
+    border: 1px solid #39ff14;
+    border-radius: 4px;
+}
 
-QWidget#agentPanel QLabel#assistantAvatar {{
-    color: white;
-    background: qlineargradient(x1:0,y1:0,x2:1,y2:1,
-        stop:0 #38bdf8, stop:1 #8b5cf6);
-    border-radius: 15px;
-    font-weight: 800;
-}}
+QWidget#agentPanel QLabel#assistantAvatar {
+    color: #39ff14;
+    background: #0d180d;
+    border: 1px solid #1ed760;
+    border-radius: 4px;
+}
 
-QWidget#agentPanel QTextBrowser#messageBody {{
+QWidget#agentPanel QTextBrowser#messageBody {
     background: transparent;
-    color: {C['text']};
+    color: #cfe9d2;
     border: none;
     font-size: 14px;
-    line-height: 150%;
-}}
+}
 
-QWidget#agentPanel QFrame#composerWrap {{
-    background: {C['bg']};
-    border-top: none;
-}}
+QWidget#agentPanel QFrame#composerWrap {
+    background: #050805;
+    border-top: 1px solid #102610;
+}
 
-QWidget#agentPanel QFrame#composerShell {{
-    background: {C['surface']};
-    border: 1px solid {C['border']};
-    border-radius: 26px;
-}}
+QWidget#agentPanel QFrame#composerShell {
+    background: #081008;
+    border: 1px solid #1b5e20;
+    border-radius: 4px;
+}
 
-QWidget#agentPanel QFrame#composerShell[focused="true"] {{
-    border: 1px solid {C['border_f']};
-    background: rgba(17, 24, 39, 1.0);
-}}
+QWidget#agentPanel QFrame#composerShell[focused="true"] {
+    background: #0a120a;
+    border: 1px solid #39ff14;
+}
 
-QWidget#agentPanel QTextEdit#composerInput {{
+QWidget#agentPanel QTextEdit#composerInput {
     background: transparent;
-    color: #f9fafb;
+    color: #d6ffd6;
     border: none;
-    font-size: 14px;
+    font-size: 13px;
     padding: 2px;
-}}
+}
 
-QWidget#agentPanel QPushButton#sendCircle {{
-    background: #f9fafb;
-    color: #0b0f17;
-    border: none;
-    border-radius: 19px;
-    font-size: 18px;
+QWidget#agentPanel QPushButton#sendCircle {
+    background: #0d180d;
+    color: #39ff14;
+    border: 1px solid #1ed760;
+    border-radius: 4px;
+    font-size: 14px;
     font-weight: 900;
-}}
+}
 
-QWidget#agentPanel QPushButton#sendCircle:hover {{
-    background: #dbeafe;
-}}
+QWidget#agentPanel QPushButton#sendCircle:hover {
+    background: #102010;
+    border: 1px solid #39ff14;
+}
 
-QWidget#agentPanel QPushButton#newBtn {{
-    background: rgba(17, 24, 39, 0.72);
-    color: {C['blue']};
-    border: 1px solid {C['border']};
-    border-radius: 14px;
+QWidget#agentPanel QPushButton#newBtn {
+    background: #0d180d;
+    color: #39ff14;
+    border: 1px solid #1ed760;
+    border-radius: 4px;
     padding: 5px 16px;
     font-size: 12px;
-}}
+}
 
-QWidget#agentPanel QPushButton#newBtn:hover {{
-    background: rgba(30, 41, 59, 0.82);
-    border-color: {C['border_f']};
-}}
+QWidget#agentPanel QPushButton#newBtn:hover {
+    background: #102010;
+    border: 1px solid #39ff14;
+}
 
-QWidget#agentPanel QPushButton#linkBtn {{
+QWidget#agentPanel QPushButton#linkBtn {
     background: transparent;
-    color: {C['blue']};
+    color: #39ff14;
     border: none;
     font-size: 12px;
-}}
+}
 
-QWidget#agentPanel QPushButton#linkBtn:hover {{ color: {C['text']}; }}
+QWidget#agentPanel QPushButton#linkBtn:hover { color: #b7ffb7; }
 
-QWidget#agentPanel QFrame#chipFrame {{
-    background: {C['bg']};
-    border-top: 1px solid {C['border']};
-}}
+QWidget#agentPanel QFrame#chipFrame {
+    background: #050805;
+    border-top: 1px solid #102610;
+}
 
-QWidget#agentPanel QPushButton#chipBtn {{
-    background: rgba(17, 24, 39, 0.72);
-    color: {C['text2']};
-    border: 1px solid {C['border']};
-    border-radius: 16px;
+QWidget#agentPanel QPushButton#chipBtn {
+    background: #0d180d;
+    color: #6fa57a;
+    border: 1px solid #1b5e20;
+    border-radius: 4px;
     padding: 7px 16px;
     font-size: 12px;
-}}
+}
 
-QWidget#agentPanel QPushButton#chipBtn:hover {{
-    background: rgba(30, 41, 59, 0.82);
-    color: {C['text']};
-    border-color: {C['border_f']};
-}}
+QWidget#agentPanel QPushButton#chipBtn:hover {
+    background: #102010;
+    color: #c9ffd1;
+    border: 1px solid #39ff14;
+}
 
-QWidget#agentPanel QScrollArea {{ background: {C['bg']}; border: none; }}
-QWidget#agentPanel QScrollBar:vertical {{
-    background: {C['bg']}; width: 5px; border: none;
-}}
-QWidget#agentPanel QScrollBar::handle:vertical {{
-    background: rgba(148,163,184,0.18); border-radius: 2px; min-height: 30px;
-}}
-QWidget#agentPanel QScrollBar::handle:vertical:hover {{ background: rgba(148,163,184,0.32); }}
-QWidget#agentPanel QScrollBar::add-line:vertical, QWidget#agentPanel QScrollBar::sub-line:vertical {{ height: 0; }}
+QWidget#agentPanel QScrollArea { background: #050805; border: none; }
+QWidget#agentPanel QScrollBar:vertical {
+    background: #050805; width: 5px; border: none;
+}
+QWidget#agentPanel QScrollBar::handle:vertical {
+    background: #1b5e20; border-radius: 2px; min-height: 30px;
+}
+QWidget#agentPanel QScrollBar::handle:vertical:hover { background: #39ff14; }
+QWidget#agentPanel QScrollBar::add-line:vertical, QWidget#agentPanel QScrollBar::sub-line:vertical { height: 0; }
 
-/* Dashboard */
-QFrame#heroCard {{
-    background: qlineargradient(x1:0,y1:0,x2:1,y2:1,
-        stop:0 #111827, stop:0.55 #0f172a, stop:1 #111827);
-    border: 1px solid rgba(96,165,250,0.18);
-    border-radius: 28px;
-}}
+QFrame#heroCard {
+    background: #081008;
+    border: 1px solid #1b5e20;
+    border-radius: 6px;
+}
 
-QLabel#heroTitle {{
-    color: #f9fafb;
-    font-size: 30px;
-    font-weight: 900;
-}}
+QLabel#heroTitle {
+    color: #b7ffb7;
+}
 
-QLabel#heroSubtitle {{
-    color: #9ca3af;
-    font-size: 14px;
-}}
+QLabel#heroSubtitle {
+    color: #7edb8d;
+}
 
-QLabel#sectionTitle {{
-    color: #9ca3af;
+QLabel#heroPrompt {
+    color: #39ff14;
+}
+
+QLabel#sectionTitle {
+    color: #6fa57a;
     font-size: 13px;
     font-weight: 600;
-}}
+}
 
-/* MetricPill */
-QFrame#metricPill {{
-    background: rgba(17,24,39,0.82);
-    border: 1px solid {C['border']};
-    border-radius: 18px;
-}}
+QFrame#metricPill {
+    background: #081008;
+    border: 1px solid #143d1f;
+    border-radius: 4px;
+}
 
-QLabel#metricValue {{
-    font-size: 25px;
-    font-weight: 850;
-    font-family: Consolas;
-}}
+QLabel#metricValue {
+    color: #39ff14;
+    font-size: 22px;
+    font-weight: 900;
+}
 
-QLabel#metricLabel {{
-    color: #8b98aa;
-    font-size: 12px;
-}}
-
-/* PromptCard */
-QFrame#promptCard {{
-    background: rgba(17,24,39,0.72);
-    border: 1px solid {C['border']};
-    border-radius: 20px;
-}}
-
-QFrame#promptCard:hover {{
-    background: rgba(30,41,59,0.82);
-    border: 1px solid rgba(96,165,250,0.38);
-}}
-
-QLabel#promptTitle {{
-    color: #f3f4f6;
-    font-size: 14px;
-    font-weight: 750;
-}}
-
-QLabel#promptDesc {{
-    color: #8b98aa;
-    font-size: 12px;
-}}
-
-QLabel#promptBadge {{
-    color: #60a5fa;
-    background: rgba(96,165,250,0.12);
-    border: 1px solid rgba(96,165,250,0.28);
-    border-radius: 10px;
-    font-size: 10px;
-    font-weight: 700;
-    font-family: Consolas;
-}}
-
-/* RiskFeedCard */
-QFrame#riskFeedCard {{
-    background: rgba(17,24,39,0.68);
-    border: 1px solid {C['border']};
-    border-radius: 18px;
-}}
-
-QFrame#riskFeedCard:hover {{
-    background: rgba(24,34,51,0.86);
-    border-color: rgba(96,165,250,0.32);
-}}
-
-QLabel#riskCve {{
-    color: #60a5fa;
-    font-size: 13px;
-    font-weight: 800;
-    font-family: Consolas;
-}}
-
-QLabel#riskTitle {{
-    color: #d1d5db;
-    font-size: 13px;
-}}
-
-QLabel#riskMeta {{
-    color: {C['text3']};
+QLabel#metricLabel {
+    color: #79b88a;
     font-size: 11px;
-}}
+}
 
-QLabel#riskScore {{
-    color: #f9fafb;
-    background: rgba(37,99,235,0.18);
-    border: 1px solid rgba(96,165,250,0.32);
-    border-radius: 26px;
+QFrame#promptCard {
+    background: #081008;
+    border: 1px solid #143d1f;
+    border-radius: 4px;
+}
+
+QFrame#promptCard:hover {
+    background: #0a120a;
+    border: 1px solid #39ff14;
+}
+
+QLabel#promptTitle {
+    color: #c9ffd1;
+    font-size: 13px;
+    font-weight: 700;
+}
+
+QLabel#promptDesc {
+    color: #75b884;
+    font-size: 12px;
+}
+
+QLabel#promptBadge {
+    color: #39ff14;
+    background: #0d180d;
+    border: 1px solid #1ed760;
+    border-radius: 2px;
+    padding: 2px 8px;
+    font-size: 10px;
+}
+
+QFrame#riskFeedCard {
+    background: #081008;
+    border: 1px solid #143d1f;
+    border-radius: 4px;
+}
+
+QFrame#riskFeedCard:hover {
+    background: #0a120a;
+    border: 1px solid #39ff14;
+}
+
+QLabel#riskCve {
+    color: #6cff6c;
+    font-size: 12px;
+    font-weight: 800;
+}
+
+QLabel#riskTitle {
+    color: #cfe9d2;
+    font-size: 12px;
+}
+
+QLabel#riskMeta {
+    color: #6fa57a;
+    font-size: 11px;
+}
+
+QLabel#riskScore {
+    color: #39ff14;
+    background: #0c160c;
+    border: 1px solid #1ed760;
+    border-radius: 4px;
     font-size: 18px;
     font-weight: 900;
-    font-family: Consolas;
-}}
+}
 """
 
 
@@ -315,10 +292,12 @@ class MetricPill(QFrame):
         self.value_label = QLabel(str(value))
         self.value_label.setObjectName("metricValue")
         self.value_label.setStyleSheet(f"color: {accent};")
+        self.value_label.setFont(pixel_font(16, bold=True))
         layout.addWidget(self.value_label)
 
         lbl = QLabel(label)
         lbl.setObjectName("metricLabel")
+        lbl.setFont(mono_font(10))
         layout.addWidget(lbl)
 
     def set_value(self, value):
@@ -343,6 +322,7 @@ class PromptCard(QFrame):
         header = QHBoxLayout()
         head = QLabel(title)
         head.setObjectName("promptTitle")
+        head.setFont(pixel_font(10, bold=True))
         header.addWidget(head)
         header.addStretch()
 
@@ -351,12 +331,14 @@ class PromptCard(QFrame):
             badge_label.setObjectName("promptBadge")
             badge_label.setAlignment(Qt.AlignCenter)
             badge_label.setFixedSize(42, 22)
+            badge_label.setFont(pixel_font(8, bold=True))
             header.addWidget(badge_label)
 
         layout.addLayout(header)
 
         body = QLabel(desc)
         body.setObjectName("promptDesc")
+        body.setFont(mono_font(10))
         body.setWordWrap(True)
         layout.addWidget(body)
 
@@ -386,25 +368,29 @@ class RiskFeedCard(QFrame):
 
         cve = QLabel(data.get("cve_id", "N/A"))
         cve.setObjectName("riskCve")
+        cve.setFont(pixel_font(10, bold=True))
         left.addWidget(cve)
 
         title = QLabel(data.get("title", ""))
         title.setObjectName("riskTitle")
+        title.setFont(mono_font(10))
         title.setWordWrap(True)
         title.setMaximumHeight(38)
         left.addWidget(title)
 
         meta = QLabel(self._meta_text(data))
         meta.setObjectName("riskMeta")
+        meta.setFont(mono_font(9))
         left.addWidget(meta)
 
         layout.addLayout(left, 1)
 
-        score = data.get("score", 0) or 0
-        badge = QLabel(f"{score:.0f}")
+        score = int(data.get("score", 0) or 0)
+        badge = QLabel(f"{score:03d}")
         badge.setObjectName("riskScore")
         badge.setAlignment(Qt.AlignCenter)
         badge.setFixedSize(52, 52)
+        badge.setFont(pixel_font(12, bold=True))
         layout.addWidget(badge)
 
     def _meta_text(self, data: dict) -> str:
@@ -466,16 +452,19 @@ class AgentPanel(QWidget):
 
         title = QLabel("Rcon AI")
         title.setObjectName("agentTitle")
+        title.setFont(pixel_font(12, bold=True))
         tb.addWidget(title)
         tb.addSpacing(10)
-        subtitle = QLabel("本地漏洞情报助手")
+        subtitle = QLabel("local vuln intel assistant")
         subtitle.setObjectName("agentSubtitle")
+        subtitle.setFont(mono_font(9))
         tb.addWidget(subtitle)
         tb.addStretch()
 
-        self.btn_new = QPushButton("+ 新对话")
+        self.btn_new = QPushButton("+ NEW")
         self.btn_new.setObjectName("newBtn")
         self.btn_new.setCursor(Qt.PointingHandCursor)
+        self.btn_new.setFont(pixel_font(9, bold=True))
         self.btn_new.clicked.connect(self._clear)
         tb.addWidget(self.btn_new)
 
@@ -534,6 +523,11 @@ class AgentPanel(QWidget):
         self.composer = ChatComposer()
         self.composer.setMaximumWidth(COMPOSER_MAX_WIDTH)
         self.composer.submitted.connect(self._send)
+        self.composer.input.setPlaceholderText("> query CVE / KEV / EPSS or generate fix priority list...")
+        self.composer.input.setFont(mono_font(11))
+        self.composer.send_btn.setText(">>")
+        self.composer.send_btn.setFixedSize(44, 34)
+        self.composer.send_btn.setFont(pixel_font(10, bold=True))
 
         wrap_l.addStretch(1)
         wrap_l.addWidget(self.composer, 1)
@@ -567,14 +561,21 @@ class AgentPanel(QWidget):
         hero_l.setContentsMargins(28, 28, 28, 28)
         hero_l.setSpacing(10)
 
-        hero_title = QLabel("Rcon AI")
+        hero_title = QLabel("RCON_AI")
         hero_title.setObjectName("heroTitle")
+        hero_title.setFont(pixel_font(22, bold=True))
         hero_l.addWidget(hero_title)
 
-        hero_sub = QLabel("询问漏洞、CVE、KEV、EPSS、修复优先级")
+        hero_sub = QLabel("LOCAL VULN INTEL ASSISTANT")
         hero_sub.setObjectName("heroSubtitle")
+        hero_sub.setFont(pixel_font(9))
         hero_sub.setWordWrap(True)
         hero_l.addWidget(hero_sub)
+
+        hero_prompt = QLabel("> query CVE / KEV / EPSS / PATCH_PRIORITY")
+        hero_prompt.setObjectName("heroPrompt")
+        hero_prompt.setFont(mono_font(10))
+        hero_l.addWidget(hero_prompt)
 
         layout.addWidget(hero)
 

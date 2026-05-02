@@ -306,6 +306,10 @@ def main():
     app.setQuitOnLastWindowClosed(False)  # Keep running when main window is hidden
     app.setStyle("Fusion")
 
+    # Load custom fonts for agent page
+    from app.ui.fonts import load_ui_fonts
+    load_ui_fonts()
+
     # Set application icon
     from PySide6.QtGui import QIcon
     icon_path = Path(__file__).parent / "resources" / "icon.png"
