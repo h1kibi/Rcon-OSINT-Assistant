@@ -1,5 +1,6 @@
 from collections import defaultdict
 from app.collectors.base import NormalizedVulnerability
+from app.utils.time import _ensure_aware
 
 
 def deduplicate(vulns: list[NormalizedVulnerability]) -> list[NormalizedVulnerability]:
@@ -58,7 +59,7 @@ def _merge_group(key: str, items: list[NormalizedVulnerability]) -> NormalizedVu
 
     # Compute earliest published_at across all sources
     published_candidates = [
-        (v.published_at, v.source)
+        (_ensure_aware(v.published_at), v.source)
         for v in items
         if v.published_at is not None
     ]
@@ -69,7 +70,7 @@ def _merge_group(key: str, items: list[NormalizedVulnerability]) -> NormalizedVu
         best.published_at = earliest_time
 
     # Compute latest modified_at
-    modified_dates = [v.modified_at for v in items if v.modified_at]
+    modified_dates = [_ensure_aware(v.modified_at) for v in items if v.modified_at]
     if modified_dates:
         best.modified_at = max(modified_dates)
 
