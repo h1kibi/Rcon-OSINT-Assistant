@@ -51,7 +51,7 @@ def get_vulnerabilities(
     source: Optional[str] = None,
     days: Optional[int] = None,
     keyword: Optional[str] = None,
-    sort: str = "score_desc",
+    sort: str = "smart",
     limit: int = 500,
     offset: int = 0,
 ) -> list[Vulnerability]:
@@ -145,21 +145,33 @@ def get_vulnerabilities(
 
     # Sorting
     from sqlalchemy import case
+    from datetime import datetime as dt
 
-    # Ignored items always go to bottom
-    ignored_penalty = case(
-        (Vulnerability.status == "ignored", -100000),
+    # ── Rankings (first-class ORDER BY keys, not mixed into score) ──
+    ignored_rank = case(
+        (Vulnerability.status == "ignored", 1),
+        else_=0,
+    )
+    watched_rank = case(
+        (Vulnerability.status == "watched", 1),
+        else_=0,
+    )
+    kev_rank = case(
+        (Vulnerability.is_kev == True, 1),  # noqa: E712
+        else_=0,
+    )
+    poc_rank = case(
+        (Vulnerability.has_poc_signal == True, 1),  # noqa: E712
         else_=0,
     )
 
+    # ── Null-safe score fields ──
+    score = sa_func.coalesce(Vulnerability.action_value_score, 0)
+    cvss = sa_func.coalesce(Vulnerability.cvss_score, 0)
+    epss_pct = sa_func.coalesce(Vulnerability.epss_percentile, 0)
+
     if sort == "smart":
-        # ── Smart: action_value_score + exponential recency decay + KEV boost ──
-        #
-        # Base:        action_value_score  (0-100)  — composite risk score
-        # Recency:     max(0, 20 * (1 - age_hours / 168))  — linear decay over 7 days
-        #   - 0h old:  +20   1h: +19.9   24h: +17.1   72h: +11.4   168h+: 0
-        # KEV:         +5 if CISA KEV  — known exploitation demands immediate attention
-        # Ignored:     -10000  — always last
+        # ── Smart: action_value_score + continuous recency decay + confidence ──
         age_hours = (sa_func.julianday("now") - sa_func.julianday(
             sa_func.coalesce(
                 Vulnerability.disclosed_at,
@@ -169,42 +181,83 @@ def get_vulnerabilities(
         )) * 24.0
 
         recency_decay = case(
-            (age_hours < 168, 20.0 * (1.0 - age_hours / 168.0)),
+            (age_hours < 168, 8.0 * (1.0 - age_hours / 168.0)),
             else_=0,
         )
-        kev_bonus = case(
-            (Vulnerability.is_kev == True, 5),  # noqa: E712
+        confidence_bonus = case(
+            (Vulnerability.source_confidence_score >= 80, 3),
+            (Vulnerability.source_confidence_score >= 60, 1),
             else_=0,
         )
 
-        smart_score = (
-            Vulnerability.action_value_score
-            + recency_decay
-            + kev_bonus
-            + ignored_penalty
+        smart_score = score + recency_decay + confidence_bonus
+
+        stmt = stmt.order_by(
+            ignored_rank.asc(),
+            watched_rank.desc(),
+            smart_score.desc(),
+            kev_rank.desc(),
+            epss_pct.desc(),
+            poc_rank.desc(),
+            cvss.desc(),
+            effective_date.desc(),
+            Vulnerability.id.desc(),
         )
-        order = smart_score.desc()
 
     elif sort == "date_desc":
-        # Ignored last, then newest first
-        order = (Vulnerability.status == "ignored").asc(), effective_date.desc()
+        stmt = stmt.order_by(
+            ignored_rank.asc(),
+            effective_date.desc(),
+            score.desc(),
+            Vulnerability.id.desc(),
+        )
 
     elif sort == "date_asc":
-        order = (Vulnerability.status == "ignored").asc(), effective_date.asc()
+        stmt = stmt.order_by(
+            ignored_rank.asc(),
+            effective_date.asc(),
+            score.desc(),
+            Vulnerability.id.desc(),
+        )
 
     elif sort == "cvss_desc":
-        order = (Vulnerability.status == "ignored").asc(), Vulnerability.cvss_score.desc()
+        stmt = stmt.order_by(
+            ignored_rank.asc(),
+            cvss.desc(),
+            score.desc(),
+            epss_pct.desc(),
+            effective_date.desc(),
+            Vulnerability.id.desc(),
+        )
 
     elif sort == "cvss_asc":
-        order = (Vulnerability.status == "ignored").asc(), Vulnerability.cvss_score.asc()
+        stmt = stmt.order_by(
+            ignored_rank.asc(),
+            cvss.asc(),
+            score.desc(),
+            effective_date.desc(),
+            Vulnerability.id.desc(),
+        )
 
     elif sort == "score_asc":
-        order = (Vulnerability.status == "ignored").asc(), Vulnerability.action_value_score.asc()
+        stmt = stmt.order_by(
+            ignored_rank.asc(),
+            score.asc(),
+            effective_date.desc(),
+            Vulnerability.id.desc(),
+        )
 
     else:
-        order = (Vulnerability.status == "ignored").asc(), Vulnerability.action_value_score.desc()
+        # score_desc fallback
+        stmt = stmt.order_by(
+            ignored_rank.asc(),
+            score.desc(),
+            kev_rank.desc(),
+            epss_pct.desc(),
+            effective_date.desc(),
+            Vulnerability.id.desc(),
+        )
 
-    stmt = stmt.order_by(*order) if isinstance(order, tuple) else stmt.order_by(order)
     stmt = stmt.offset(offset).limit(limit)
     return list(session.exec(stmt).all())
 

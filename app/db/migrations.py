@@ -173,3 +173,18 @@ def _run_schema_migrations(session: Session):
 
     session.commit()
     logger.info("Schema migrations completed")
+
+    # Composite indexes for sort performance
+    _create_sort_indexes(session)
+
+
+def _create_sort_indexes(session: Session):
+    for idx_sql in [
+        "CREATE INDEX IF NOT EXISTS ix_vuln_score_sort ON vulnerabilities(status, action_value_score DESC, published_at DESC, id DESC)",
+        "CREATE INDEX IF NOT EXISTS ix_vuln_date_sort ON vulnerabilities(status, published_at DESC, action_value_score DESC, id DESC)",
+        "CREATE INDEX IF NOT EXISTS ix_vuln_cvss_sort ON vulnerabilities(status, cvss_score DESC, action_value_score DESC, id DESC)",
+        "CREATE INDEX IF NOT EXISTS ix_vuln_kev_sort ON vulnerabilities(is_kev, action_value_score DESC, published_at DESC)",
+    ]:
+        session.execute(text(idx_sql))
+    session.commit()
+    logger.info("Sort composite indexes created")
