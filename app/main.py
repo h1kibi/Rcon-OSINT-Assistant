@@ -438,17 +438,52 @@ def main():
     sync_signals.sync_done.connect(main_window.load_data)
     sync_signals.sync_done.connect(update_badge)
 
+    # Settings hot-reload: use mutable container so closures see updates
+    _settings_ref = [settings]
+    _scorer_ref = [scorer_config]
+
+    def get_settings():
+        return _settings_ref[0]
+
+    def get_scorer():
+        return _scorer_ref[0]
+
     def sync_func():
-        # Immediately reload current data
         main_window.load_data()
         update_badge()
-        # Then run sync in background, reload again when done
-        _run_sync_async(settings, collectors, epss_collector, scorer_config, sync_signals)
+        _run_sync_async(get_settings(), collectors, epss_collector, get_scorer(), sync_signals)
 
     sync_scheduler = SyncScheduler(
-        lambda: _run_sync(settings, collectors, epss_collector, scorer_config),
-        interval_minutes=settings.app.refresh_interval_minutes,
+        lambda: _run_sync(get_settings(), collectors, epss_collector, get_scorer()),
+        interval_minutes=get_settings().app.refresh_interval_minutes,
     )
+
+    # Connect config hot-reload
+    def on_config_changed(new_config):
+        _settings_ref[0] = new_config
+        _scorer_ref[0] = ScorerConfig(
+            kev_weight=new_config.scoring.kev_weight,
+            epss_95_weight=new_config.scoring.epss_95_weight,
+            epss_85_weight=new_config.scoring.epss_85_weight,
+            cvss_critical_weight=new_config.scoring.cvss_critical_weight,
+            cvss_high_weight=new_config.scoring.cvss_high_weight,
+            recent_24h_weight=new_config.scoring.recent_24h_weight,
+            recent_7d_weight=new_config.scoring.recent_7d_weight,
+            official_confirmed_weight=new_config.scoring.official_confirmed_weight,
+            patch_available_weight=new_config.scoring.patch_available_weight,
+            poc_signal_weight=new_config.scoring.poc_signal_weight,
+            multi_source_confirmed_weight=new_config.scoring.multi_source_confirmed_weight,
+            watch_keyword_weight=new_config.scoring.watch_keyword_weight,
+            watch_keywords=new_config.watch.keywords,
+            watch_vendors=new_config.watch.vendors,
+            watch_products=new_config.watch.products,
+        )
+        # Update refresh interval
+        sync_scheduler.interval_minutes = new_config.app.refresh_interval_minutes
+        # Update badge threshold
+        floating_ball._min_score = new_config.ui.min_score_to_badge
+
+    main_window.config_changed.connect(on_config_changed)
 
     # Connect signals
     floating_ball.open_main.connect(main_window.show)

@@ -148,6 +148,7 @@ class MainWindow(QMainWindow):
 
     refresh_requested = Signal()
     rescore_requested = Signal()
+    config_changed = Signal(object)  # Emitted when config is saved, carries new config
 
     def __init__(self, db_session_factory, config, parent=None):
         super().__init__(parent)
@@ -546,6 +547,7 @@ class MainWindow(QMainWindow):
         config_path = Path("config.toml")
         if config_path.exists():
             self.config = load_config(config_path)
+            self.config_changed.emit(self.config)
             logger.info("Config reloaded from disk")
 
     def _save_config_toml(self, result):
