@@ -704,7 +704,18 @@ class AgentPanel(QWidget):
         self._busy = False
         self._current_stream = None
         self.composer.set_generating(False)
+
+    def _clear(self):
+        while self.chat_layout.count() > 1:
+            item = self.chat_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        self._history.clear()
+        self._streaming = False
+        self._busy = False
+        self._current_stream = None
         self._current_ai_msg = None
         self.chat_scroll.hide()
         self.dashboard.show()
+        self._load_dashboard()
         self._load_dashboard()
