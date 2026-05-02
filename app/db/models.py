@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from typing import Optional
 from sqlmodel import SQLModel, Field
-from sqlalchemy import Column, DateTime, func
+from sqlalchemy import Column, DateTime, func, UniqueConstraint
 
 
 def _utcnow() -> datetime:
@@ -66,6 +66,7 @@ class AffectedProduct(SQLModel, table=True):
 
 class VulnerabilityReference(SQLModel, table=True):
     __tablename__ = "vulnerability_references"
+    __table_args__ = (UniqueConstraint("vulnerability_id", "url", name="uq_vuln_ref_url"),)
 
     id: Optional[int] = Field(default=None, primary_key=True)
     vulnerability_id: int = Field(foreign_key="vulnerabilities.id", index=True)
@@ -76,6 +77,9 @@ class VulnerabilityReference(SQLModel, table=True):
 
 class SourceRecord(SQLModel, table=True):
     __tablename__ = "source_records"
+    __table_args__ = (
+        UniqueConstraint("vulnerability_id", "source", "source_id", name="uq_source_record_identity"),
+    )
 
     id: Optional[int] = Field(default=None, primary_key=True)
     vulnerability_id: Optional[int] = Field(
@@ -125,10 +129,12 @@ class CollectorStatus(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     source_name: str = Field(index=True, unique=True)
     enabled: bool = Field(default=True)
+    initialized: bool = Field(default=False)
     last_success_sync_at: Optional[datetime] = Field(default=None)
     last_error_at: Optional[datetime] = Field(default=None)
     last_error: str = Field(default="")
     last_cursor: str = Field(default="")
+    items_count: int = Field(default=0)
     health_status: str = Field(default="unknown")
     created_at: datetime = Field(default_factory=_utcnow)
     updated_at: datetime = Field(default_factory=_utcnow)

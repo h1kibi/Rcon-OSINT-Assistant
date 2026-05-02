@@ -2,8 +2,30 @@ from sqlmodel import Session, text
 from loguru import logger
 
 
+def _ensure_schema_version(session: Session):
+    session.execute(text("""
+        CREATE TABLE IF NOT EXISTS schema_migrations (
+            version INTEGER PRIMARY KEY,
+            applied_at TEXT NOT NULL
+        )
+    """))
+    session.commit()
+
+
+def _get_applied_versions(session: Session) -> set[int]:
+    rows = session.execute(text("SELECT version FROM schema_migrations")).fetchall()
+    return {r[0] for r in rows}
+
+
+def _mark_applied(session: Session, version: int):
+    session.execute(
+        text("INSERT INTO schema_migrations (version, applied_at) VALUES (:ver, datetime('now'))"),
+        {"ver": version},
+    )
+    session.commit()
+
+
 def create_fts5(session: Session):
-    """Create SQLite FTS5 virtual table for full-text search."""
     session.execute(text("""
         CREATE VIRTUAL TABLE IF NOT EXISTS vulnerabilities_fts USING fts5(
             cve_id, ghsa_id, osv_id, title, description,
@@ -15,7 +37,25 @@ def create_fts5(session: Session):
     logger.info("FTS5 index created")
 
 
-def create_triggers(session: Session):
+def run_migrations(session: Session):
+    _ensure_schema_version(session)
+    applied = _get_applied_versions(session)
+
+    # Only auto-migrate legacy state: if nothing is applied yet, run everything
+    if not applied:
+        _migrate_v1(session)
+        _mark_applied(session, 1)
+    else:
+        logger.info(f"Schema already at version(s): {sorted(applied)}")
+
+
+def _migrate_v1(session: Session):
+    create_fts5(session)
+    _create_fts_triggers(session)
+    _run_schema_migrations(session)
+
+
+def _create_fts_triggers(session: Session):
     """Create triggers to keep FTS5 index in sync."""
     session.execute(text("""
         CREATE TRIGGER IF NOT EXISTS vulnerabilities_ai AFTER INSERT ON vulnerabilities BEGIN
@@ -45,7 +85,7 @@ def create_triggers(session: Session):
     logger.info("FTS5 triggers created")
 
 
-def run_schema_migrations(session: Session):
+def _run_schema_migrations(session: Session):
     """Lightweight SQLite schema migration for new columns."""
     vuln_cols = {row[1] for row in session.execute(text("PRAGMA table_info(vulnerabilities)"))}
     if "disclosed_at" not in vuln_cols:
@@ -133,10 +173,3 @@ def run_schema_migrations(session: Session):
 
     session.commit()
     logger.info("Schema migrations completed")
-
-
-def run_migrations(session: Session):
-    """Run all migrations."""
-    create_fts5(session)
-    create_triggers(session)
-    run_schema_migrations(session)

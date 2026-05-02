@@ -261,14 +261,14 @@ def save_affected_products(
         )
     ).all()
     existing_keys = {
-        (e.vendor, e.product, e.package_name): e for e in existing
+        _affected_product_key(e): e for e in existing
     }
 
     for p in products:
         vendor = p.get("vendor", "")
         product = p.get("product", "")
         pkg_name = p.get("package_name", "")
-        key = (vendor, product, pkg_name)
+        key = _affected_product_key_from_dict(p, vendor, product, pkg_name)
 
         if key in existing_keys:
             ap = existing_keys[key]
@@ -378,6 +378,8 @@ def upsert_collector_status(session: Session, cs: CollectorStatus):
         existing.last_error_at = cs.last_error_at
         existing.last_error = cs.last_error
         existing.last_cursor = cs.last_cursor
+        existing.initialized = cs.initialized or existing.initialized
+        existing.items_count = cs.items_count or existing.items_count
         existing.health_status = cs.health_status
         existing.enabled = cs.enabled
         existing.updated_at = _utcnow()
@@ -679,3 +681,27 @@ def get_personal_library_entries(
     if entry_type:
         stmt = stmt.where(PersonalLibraryEntry.entry_type == entry_type)
     return list(session.exec(stmt.order_by(PersonalLibraryEntry.created_at.desc())).all())
+
+
+def _affected_product_key(ap: AffectedProduct) -> tuple:
+    return (
+        _norm(ap.vendor), _norm(ap.product), _norm(ap.package_ecosystem),
+        _norm(ap.package_name), _norm(ap.cpe),
+        _norm(ap.version_start), _norm(ap.version_end), _norm(ap.fixed_version),
+    )
+
+
+def _affected_product_key_from_dict(p: dict, vendor: str, product: str, pkg_name: str) -> tuple:
+    return (
+        _norm(vendor), _norm(product),
+        _norm(p.get("package_ecosystem", "")),
+        _norm(pkg_name),
+        _norm(p.get("cpe", "")),
+        _norm(p.get("version_start", "")),
+        _norm(p.get("version_end", "")),
+        _norm(p.get("fixed_version", "")),
+    )
+
+
+def _norm(s):
+    return (s or "").strip().lower()

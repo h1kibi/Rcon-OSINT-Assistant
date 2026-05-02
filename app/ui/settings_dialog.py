@@ -135,7 +135,7 @@ def _form_row(label, widget):
 
 
 class SettingsDialog(QDialog):
-    def __init__(self, config, preferences: dict, parent=None):
+    def __init__(self, config, preferences: dict, parent=None, collector_status: list | None = None):
         super().__init__(parent)
         self.setWindowTitle("设置")
         self.setMinimumSize(500, 550)
@@ -152,6 +152,8 @@ class SettingsDialog(QDialog):
         tabs.addTab(self._build_sources_tab(), "情报来源")
         tabs.addTab(self._build_scoring_tab(), "评分配置")
         tabs.addTab(self._build_agent_tab(), "Agent 配置")
+        if collector_status:
+            tabs.addTab(self._build_source_status_tab(collector_status), "数据源状态")
         layout.addWidget(tabs)
 
         btn_layout = QHBoxLayout()
@@ -184,11 +186,11 @@ class SettingsDialog(QDialog):
         l_net.setSpacing(10)
         self.chk_auto_update_startup = GlowCheckBox("启动时自动联网更新数据库")
         self.chk_auto_update_startup.setToolTip("打开程序后自动从互联网拉取最新漏洞情报")
-        self.chk_auto_update_startup.setChecked(True)
+        self.chk_auto_update_startup.setChecked(self.config.app.auto_update_on_startup)
         l_net.addWidget(self.chk_auto_update_startup)
         self.chk_auto_update_enabled = GlowCheckBox("允许后台定时更新数据库")
         self.chk_auto_update_enabled.setToolTip("按设定的间隔定时更新本地数据库")
-        self.chk_auto_update_enabled.setChecked(True)
+        self.chk_auto_update_enabled.setChecked(self.config.app.auto_update_enabled)
         self.chk_auto_update_enabled.stateChanged.connect(self._on_auto_update_toggle)
         l_net.addWidget(self.chk_auto_update_enabled)
         g_net.setLayout(l_net)
@@ -385,7 +387,7 @@ class SettingsDialog(QDialog):
         g = QGroupBox("CISA 安全通告 RSS")
         vbox = QVBoxLayout()
         self.cisa_rss_enabled = GlowCheckBox("启用")
-        self.cisa_rss_enabled.setChecked(True)
+        self.cisa_rss_enabled.setChecked(self.config.cisa_rss.enabled)
         vbox.addWidget(self.cisa_rss_enabled)
         g.setLayout(vbox)
         layout.addWidget(g)
@@ -581,6 +583,48 @@ class SettingsDialog(QDialog):
         layout.addWidget(g4)
 
         self._on_agent_toggle()
+        layout.addStretch()
+        scroll.setWidget(inner)
+
+        tab = QWidget()
+        outer = QVBoxLayout(tab)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.addWidget(scroll)
+        return tab
+
+    def _build_source_status_tab(self, collector_status: list):
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+
+        inner = QWidget()
+        layout = QVBoxLayout(inner)
+        layout.setContentsMargins(6, 6, 6, 6)
+        layout.setSpacing(8)
+
+        for cs in collector_status:
+            group = QGroupBox(cs.source_name)
+            vbox = QVBoxLayout()
+            vbox.setSpacing(4)
+
+            health_color = "#3fb950" if cs.health_status == "healthy" else "#f85149" if cs.health_status == "error" else "#8b949e"
+            vbox.addWidget(QLabel(f"健康状态: <span style='color:{health_color};font-weight:bold;'>{cs.health_status}</span>"))
+
+            vbox.addWidget(QLabel(f"已初始化: {'是' if cs.initialized else '否'}"))
+            vbox.addWidget(QLabel(f"已启用: {'是' if cs.enabled else '否'}"))
+            vbox.addWidget(QLabel(f"本次拉取: {cs.items_count} 条"))
+            if cs.last_success_sync_at:
+                vbox.addWidget(QLabel(f"上次成功: {cs.last_success_sync_at}"))
+            if cs.last_error:
+                vbox.addWidget(QLabel(f"上次错误: <span style='color:#f85149;'>{cs.last_error[:120]}</span>"))
+            if cs.last_error_at:
+                vbox.addWidget(QLabel(f"错误时间: {cs.last_error_at}"))
+            if cs.last_cursor:
+                vbox.addWidget(QLabel(f"游标: {cs.last_cursor}"))
+
+            group.setLayout(vbox)
+            layout.addWidget(group)
+
         layout.addStretch()
         scroll.setWidget(inner)
 

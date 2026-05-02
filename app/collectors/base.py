@@ -40,6 +40,7 @@ class NormalizedVulnerability:
     has_poc_signal: bool = False
     cwe_ids: list[str] = field(default_factory=list)
     cpe_list: list[str] = field(default_factory=list)
+    aliases: list[str] = field(default_factory=list)
     references: list[dict] = field(default_factory=list)
     affected_products: list[dict] = field(default_factory=list)
     published_at: datetime | None = None
@@ -49,6 +50,18 @@ class NormalizedVulnerability:
     source: str = ""
     source_confidence_score: float = 50.0
     raw_json: str = ""
+
+
+@dataclass
+class CollectorResult:
+    """Unified return for all collector fetch operations."""
+    source: str
+    ok: bool
+    items: list[RawAdvisory] = field(default_factory=list)
+    fetched_at: datetime = field(default_factory=_utcnow)
+    next_cursor: str | None = None
+    error: str | None = None
+    rate_limited: bool = False
 
 
 class Collector(ABC):

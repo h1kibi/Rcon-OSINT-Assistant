@@ -42,6 +42,10 @@ max_records = 5000
 enabled = true
 base_url = "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json"
 
+[cisa_rss]
+enabled = true
+max_records = 200
+
 [epss]
 enabled = true
 base_url = "https://api.first.org/data/v1/epss"

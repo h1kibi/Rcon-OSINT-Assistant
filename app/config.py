@@ -51,6 +51,11 @@ class EPSSConfig(BaseModel):
     base_url: str = "https://api.first.org/data/v1/epss"
 
 
+class CisaRssConfig(BaseModel):
+    enabled: bool = True
+    max_records: int = 200
+
+
 class GitHubAdvisoryConfig(BaseModel):
     enabled: bool = True
     token: str = ""
@@ -152,6 +157,7 @@ class Settings(BaseSettings):
     ui: UIConfig = Field(default_factory=UIConfig)
     nvd: NVDConfig = Field(default_factory=NVDConfig)
     cisa_kev: CisaKevConfig = Field(default_factory=CisaKevConfig)
+    cisa_rss: CisaRssConfig = Field(default_factory=CisaRssConfig)
     epss: EPSSConfig = Field(default_factory=EPSSConfig)
     github_advisory: GitHubAdvisoryConfig = Field(default_factory=GitHubAdvisoryConfig)
     osv: OSVConfig = Field(default_factory=OSVConfig)
@@ -175,6 +181,7 @@ _CONFIG_MODELS = {
     "ui": UIConfig,
     "nvd": NVDConfig,
     "cisa_kev": CisaKevConfig,
+    "cisa_rss": CisaRssConfig,
     "epss": EPSSConfig,
     "github_advisory": GitHubAdvisoryConfig,
     "osv": OSVConfig,
@@ -251,4 +258,32 @@ def load_config(config_path: Optional[Path] = None) -> Settings:
         merged = {**base, **env_overrides}
         setattr(settings, section_name, model_cls(**merged))
 
+    # Keyring override for secrets (optional, graceful degradation)
+    _apply_keyring_secrets(settings)
+
     return settings
+
+
+def _apply_keyring_secrets(settings: Settings) -> None:
+    """Override API key fields from OS keychain (keyring > env > TOML)."""
+    try:
+        from app.utils.secrets import load_secret
+    except ImportError:
+        return
+
+    key_map = {
+        ("nvd", "api_key"): "nvd_api_key",
+        ("github_advisory", "token"): "github_token",
+        ("msrc", "api_key"): "msrc_api_key",
+        ("cisco", "client_id"): "cisco_client_id",
+        ("cisco", "client_secret"): "cisco_client_secret",
+        ("agent", "api_key"): "agent_api_key",
+    }
+    for (section, field), key in key_map.items():
+        cfg = getattr(settings, section, None)
+        if cfg is None:
+            continue
+        current = getattr(cfg, field, "") or ""
+        secret = load_secret(key, current)
+        if secret and secret != current:
+            setattr(cfg, field, secret)

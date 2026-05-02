@@ -4,7 +4,6 @@ from app.collectors.base import NormalizedVulnerability
 
 
 def _to_utc(dt: datetime | None) -> datetime | None:
-    """Defensive normalization for mixed timezone-aware/naive datetimes."""
     if dt is None:
         return None
     if dt.tzinfo is None:
@@ -12,43 +11,83 @@ def _to_utc(dt: datetime | None) -> datetime | None:
     return dt.astimezone(timezone.utc)
 
 
+class UnionFind:
+    def __init__(self):
+        self._parent: dict[str, str] = {}
+
+    def find(self, x: str) -> str:
+        self._parent.setdefault(x, x)
+        if self._parent[x] != x:
+            self._parent[x] = self.find(self._parent[x])
+        return self._parent[x]
+
+    def union(self, a: str, b: str) -> None:
+        ra, rb = self.find(a), self.find(b)
+        if ra != rb:
+            self._parent[rb] = ra
+
+
+def _vuln_ids(v: NormalizedVulnerability) -> list[str]:
+    """Extract all identifiers from a vulnerability for alias-graph grouping."""
+    ids: list[str] = []
+    for value in [v.cve_id, v.ghsa_id, v.osv_id, v.primary_key_id]:
+        if value:
+            ids.append(value.strip().upper())
+    for alias in v.aliases:
+        if alias:
+            ids.append(alias.strip().upper())
+    return sorted(set(ids))
+
+
 def deduplicate(vulns: list[NormalizedVulnerability]) -> list[NormalizedVulnerability]:
-    """Merge vulnerabilities by CVE ID, retaining highest-confidence fields."""
-    groups: dict[str, list[NormalizedVulnerability]] = defaultdict(list)
+    """Merge vulnerabilities using alias graph union-find across CVE/GHSA/OSV/aliases."""
+    if not vulns:
+        return []
+
+    dsu = UnionFind()
+    item_ids: list[tuple[NormalizedVulnerability, list[str]]] = []
 
     for v in vulns:
-        key = v.cve_id or v.ghsa_id or v.osv_id or v.primary_key_id
-        if key:
-            groups[key].append(v)
+        ids = _vuln_ids(v)
+        if not ids:
+            ids = [v.primary_key_id]
+        # Feed first id as canonical, link all others via union
+        first = ids[0]
+        for alias in ids[1:]:
+            dsu.union(first, alias)
+        item_ids.append((v, ids))
+
+    # Group by canonical root
+    groups: dict[str, list[NormalizedVulnerability]] = defaultdict(list)
+    for v, ids in item_ids:
+        root = dsu.find(ids[0])
+        groups[root].append(v)
 
     merged = []
-    for key, items in groups.items():
+    for root, items in groups.items():
         if len(items) == 1:
             item = items[0]
             item.disclosed_at = item.published_at
             item.disclosed_source = item.source
             merged.append(item)
-            continue
-
-        best = _merge_group(key, items)
-        merged.append(best)
+        else:
+            merged.append(_merge_group(root, items))
 
     return merged
 
 
 def _merge_group(key: str, items: list[NormalizedVulnerability]) -> NormalizedVulnerability:
-    """Merge a group of normalized vulns, preferring highest confidence source."""
     items_sorted = sorted(items, key=lambda v: v.source_confidence_score, reverse=True)
     best = items_sorted[0]
 
-    all_sources = list({v.source for v in items})
+    all_sources = list(dict.fromkeys(v.source for v in items))
     source_str = ",".join(all_sources)
     max_confidence = max(v.source_confidence_score for v in items)
 
-    merged_refs = {}
-    merged_products = {}
-    merged_cwes = set()
-    merged_cpes = set()
+    merged_refs: dict[str, dict] = {}
+    merged_products: dict[tuple, dict] = {}
+    merged_cwes: set[str] = set()
+    merged_cpes: set[str] = set()
 
     for v in items:
         for ref in v.references:
@@ -56,29 +95,27 @@ def _merge_group(key: str, items: list[NormalizedVulnerability]) -> NormalizedVu
             if url and url not in merged_refs:
                 merged_refs[url] = ref
         for ap in v.affected_products:
-            vendor = ap.get("vendor", "")
-            product = ap.get("product", "")
-            combined = f"{vendor}::{product}"
-            if combined not in merged_products:
-                merged_products[combined] = ap
+            key_ap = _affected_product_key(ap)
+            if key_ap not in merged_products:
+                merged_products[key_ap] = ap
         for cwe in v.cwe_ids:
             merged_cwes.add(cwe)
         for cpe in v.cpe_list:
             merged_cpes.add(cpe)
 
-    # Compute earliest published_at across all sources
-        published_candidates = [
-            (_to_utc(v.published_at), v.source)
-            for v in items
-            if v.published_at is not None
-        ]
+    # Earliest published_at
+    published_candidates = [
+        (_to_utc(v.published_at), v.source)
+        for v in items
+        if v.published_at is not None
+    ]
     if published_candidates:
         earliest_time, earliest_source = min(published_candidates, key=lambda x: x[0])
         best.disclosed_at = earliest_time
         best.disclosed_source = earliest_source
         best.published_at = earliest_time
 
-    # Compute latest modified_at
+    # Latest modified_at
     modified_dates = [_to_utc(v.modified_at) for v in items if v.modified_at]
     if modified_dates:
         best.modified_at = max(modified_dates)
@@ -114,9 +151,24 @@ def _merge_group(key: str, items: list[NormalizedVulnerability]) -> NormalizedVu
 
     best.references = list(merged_refs.values())
     best.affected_products = list(merged_products.values())
-    best.cwe_ids = list(merged_cwes)
-    best.cpe_list = list(merged_cpes)
+    best.cwe_ids = sorted(merged_cwes)
+    best.cpe_list = sorted(merged_cpes)
     best.source = source_str
     best.source_confidence_score = max_confidence
 
     return best
+
+
+def _affected_product_key(product: dict) -> tuple:
+    """Composite dedup key including version range and ecosystem."""
+    fields = (
+        "vendor",
+        "product",
+        "package_ecosystem",
+        "package_name",
+        "cpe",
+        "version_start",
+        "version_end",
+        "fixed_version",
+    )
+    return tuple(str(product.get(f, "") or "").strip().lower() for f in fields)

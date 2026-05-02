@@ -1,5 +1,5 @@
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from loguru import logger
 
@@ -23,6 +23,36 @@ class ScorerConfig:
     watch_products: list[str] | None = None
 
 
+@dataclass
+class ScoreResult:
+    score: int
+    severity_band: str
+    reasons: list[str] = field(default_factory=list)
+    penalties: list[str] = field(default_factory=list)
+    confidence: float = 50.0
+    recommended_action: str = ""
+
+
+def _severity_band(score: int) -> str:
+    if score >= 90:
+        return "CRITICAL"
+    if score >= 70:
+        return "HIGH"
+    if score >= 40:
+        return "MEDIUM"
+    return "LOW"
+
+
+def _recommended_action(score: int) -> str:
+    if score >= 90:
+        return "立即处置：24小时内完成修复或隔离"
+    if score >= 70:
+        return "尽快处置：72小时内完成修复"
+    if score >= 40:
+        return "安排处置：下个维护窗口修复"
+    return "跟踪关注：在安全策略中记录并定期复查"
+
+
 HIGH_RISK_KEYWORDS = [
     "RCE", "远程代码执行", "remote code execution",
     "auth bypass", "authentication bypass", "权限提升",
@@ -34,13 +64,14 @@ HIGH_RISK_KEYWORDS = [
 ]
 
 
-def calculate_score(vuln: dict, config: ScorerConfig) -> tuple[float, list[str]]:
+def calculate_score(vuln: dict, config: ScorerConfig) -> ScoreResult:
     """
     Calculate action_value_score (0-100) for a vulnerability.
-    Returns (score, reasons).
+    Returns ScoreResult with reasons, penalties, confidence, and recommended action.
     """
     score = 0.0
-    reasons = []
+    reasons: list[str] = []
+    penalties: list[str] = []
 
     watch_keywords = config.watch_keywords or []
     watch_vendors = config.watch_vendors or []
@@ -153,10 +184,11 @@ def calculate_score(vuln: dict, config: ScorerConfig) -> tuple[float, list[str]]
         reasons.append(f"命中关注产品: +{config.watch_keyword_weight}")
 
     # Penalty for low-confidence-only sources
-    if vuln.get("source_confidence_score", 0) <= 40:
+    source_conf = vuln.get("source_confidence_score", 0)
+    if source_conf <= 40:
         penalty = 15
         score -= penalty
-        reasons.append(f"低可信来源为主: -{penalty}")
+        penalties.append(f"低可信来源为主(置信度{source_conf}): -{penalty}")
 
     # Penalty for missing critical info
     missing_count = sum([
@@ -167,11 +199,24 @@ def calculate_score(vuln: dict, config: ScorerConfig) -> tuple[float, list[str]]
     if missing_count >= 2:
         penalty = missing_count * 5
         score -= penalty
-        reasons.append(f"信息缺失严重: -{penalty}")
+        penalties.append(f"信息缺失严重({missing_count}/3项): -{penalty}")
 
     # Cap at 100, floor at 0
     if score > 100:
-        reasons.append(f"综合封顶为100")
-    score = max(0.0, min(100.0, score))
+        reasons.append("综合封顶为100")
+    final_score = int(max(0.0, min(100.0, score)))
 
-    return score, reasons
+    # Confidence estimate
+    conf_value = float(source_conf)
+    if missing_count >= 2:
+        conf_value -= 20
+    confidence = max(5.0, min(100.0, conf_value))
+
+    return ScoreResult(
+        score=final_score,
+        severity_band=_severity_band(final_score),
+        reasons=reasons,
+        penalties=penalties,
+        confidence=confidence,
+        recommended_action=_recommended_action(final_score),
+    )

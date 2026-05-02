@@ -1,17 +1,38 @@
 from datetime import datetime, timezone
 from loguru import logger
 from sqlmodel import Session, select, col, func
-from app.collectors.base import RawAdvisory
+from app.collectors.base import RawAdvisory, CollectorResult
 from app.db import repositories as repo
-from app.db.models import SourceRecord, CollectorStatus, Vulnerability
+from app.db.models import SourceRecord, CollectorStatus
 from app.pipeline.normalizer import normalize
 from app.pipeline.deduplicator import deduplicate
-from app.pipeline.scorer import calculate_score, ScorerConfig
+from app.pipeline.scorer import calculate_score, ScorerConfig, ScoreResult
 from app.pipeline.source_confidence import get_confidence
 
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+def _run_collector(collector, name: str, since) -> CollectorResult:
+    """Run a single collector and return unified CollectorResult."""
+    try:
+        raw_list = collector.fetch_since(since)
+        return CollectorResult(
+            source=name,
+            ok=True,
+            items=raw_list,
+            fetched_at=_utcnow(),
+            next_cursor=_utcnow().isoformat(),
+        )
+    except Exception as e:
+        logger.error(f"Collector {name} failed: {e}")
+        return CollectorResult(
+            source=name,
+            ok=False,
+            error=str(e),
+            fetched_at=_utcnow(),
+        )
 
 
 def run_sync_service(
@@ -27,36 +48,33 @@ def run_sync_service(
     status_list = repo.get_all_collector_status(session)
     status_map = {s.source_name: s for s in status_list}
 
-    # Check if database has any data (first run detection)
-    vuln_count = session.exec(select(func.count(Vulnerability.id))).one()
-    is_first_run = vuln_count < 100
-
     for name, collector in collectors.items():
         if not collector.source_name:
             continue
-        try:
-            st = status_map.get(name)
-            since = None
-            if st and st.last_success_sync_at and collector.supports_incremental and not is_first_run:
-                since = st.last_success_sync_at
+        st = status_map.get(name)
+        since = None
+        if st and st.initialized and st.last_success_sync_at and collector.supports_incremental:
+            since = st.last_success_sync_at
 
-            raw_list = collector.fetch_since(since)
-            all_raw.extend(raw_list)
-
+        cr = _run_collector(collector, name, since)
+        if cr.ok:
+            all_raw.extend(cr.items)
             repo.upsert_collector_status(session, CollectorStatus(
-                source_name=name,
+                source_name=cr.source,
                 enabled=True,
-                last_success_sync_at=_utcnow(),
+                initialized=True,
+                last_success_sync_at=cr.fetched_at,
+                items_count=len(cr.items),
                 health_status="healthy",
-                last_cursor=_utcnow().isoformat(),
+                last_cursor=cr.next_cursor or _utcnow().isoformat(),
             ))
-        except Exception as e:
-            logger.error(f"Collector {name} failed: {e}")
+        else:
             repo.upsert_collector_status(session, CollectorStatus(
-                source_name=name,
+                source_name=cr.source,
                 enabled=True,
-                last_error_at=_utcnow(),
-                last_error=str(e),
+                initialized=st.initialized if st else False,
+                last_error_at=cr.fetched_at,
+                last_error=cr.error or "",
                 health_status="error",
             ))
 
@@ -106,7 +124,7 @@ def run_sync_service(
             "description": nv.description,
             "affected_products": nv.affected_products,
         }
-        score, reasons = calculate_score(vuln_dict, scorer_config)
+        result = calculate_score(vuln_dict, scorer_config)
 
         existing = session.exec(
             select(Vulnerability).where(
@@ -134,8 +152,8 @@ def run_sync_service(
             has_patch=nv.has_patch,
             has_poc_signal=nv.has_poc_signal,
             source_confidence_score=nv.source_confidence_score,
-            action_value_score=score,
-            action_value_reason="\n".join(reasons),
+            action_value_score=result.score,
+            action_value_reason="\n".join(result.reasons),
             disclosed_at=nv.disclosed_at or nv.published_at,
             disclosed_source=nv.disclosed_source or nv.source,
             published_at=nv.published_at,
@@ -178,7 +196,7 @@ def run_sync_service(
             repo.save_references(session, saved.id, nv.references)
 
         # Create notification for new high-value vulns
-        if is_new and score >= 70:
+        if is_new and result.score >= 70:
             repo.create_notification(session, saved.id)
 
     logger.info(f"Sync complete: processed {len(deduped)} vulnerabilities")

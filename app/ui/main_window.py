@@ -549,10 +549,11 @@ class MainWindow(QMainWindow):
                 "quiet_hours_end": prefs.quiet_hours_end,
                 "watch_keywords": prefs.watch_keywords.split(",") if prefs.watch_keywords else [],
             }
+            collector_status = repo.get_all_collector_status(session)
         finally:
             session.close()
 
-        dlg = SettingsDialog(self.config, prefs_dict, self)
+        dlg = SettingsDialog(self.config, prefs_dict, self, collector_status)
         if dlg.exec():
             result = dlg.get_result()
             session = self.db()
@@ -625,6 +626,10 @@ class MainWindow(QMainWindow):
         if "cisa_kev" not in data:
             data["cisa_kev"] = {}
         data["cisa_kev"]["enabled"] = result.get("kev_enabled", True)
+
+        if "cisa_rss" not in data:
+            data["cisa_rss"] = {}
+        data["cisa_rss"]["enabled"] = result.get("cisa_rss_enabled", True)
 
         if "epss" not in data:
             data["epss"] = {}

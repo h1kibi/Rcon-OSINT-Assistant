@@ -60,3 +60,19 @@ class TestLoadConfig:
 
         settings = load_config(p)
         assert settings.proxy.enabled is True
+
+
+class TestExampleConfig:
+    def test_covers_all_settings_sections(self):
+        import tomllib
+        from pathlib import Path
+        from app.config import Settings
+
+        example_path = Path(__file__).parent.parent / "config.example.toml"
+        assert example_path.exists(), "config.example.toml not found"
+
+        example = tomllib.loads(example_path.read_text(encoding="utf-8"))
+        settings_sections = set(Settings.model_fields)
+
+        missing = settings_sections - set(example)
+        assert not missing, f"Missing sections in config.example.toml: {missing}"
