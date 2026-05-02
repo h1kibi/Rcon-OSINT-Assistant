@@ -49,6 +49,10 @@ def run_migrations(session: Session):
         _create_sort_indexes(session)
         _mark_applied(session, 2)
 
+    if 3 not in applied:
+        _add_collector_status_columns(session)
+        _mark_applied(session, 3)
+
     logger.info(f"Schema at version(s): {sorted(_get_applied_versions(session))}")
 
 
@@ -176,6 +180,16 @@ def _run_schema_migrations(session: Session):
 
     session.commit()
     logger.info("Schema migrations completed")
+
+
+def _add_collector_status_columns(session: Session):
+    cs_cols = {row[1] for row in session.execute(text("PRAGMA table_info(collector_status)"))}
+    if "initialized" not in cs_cols:
+        session.execute(text("ALTER TABLE collector_status ADD COLUMN initialized BOOLEAN DEFAULT 0"))
+    if "items_count" not in cs_cols:
+        session.execute(text("ALTER TABLE collector_status ADD COLUMN items_count INTEGER DEFAULT 0"))
+    session.commit()
+    logger.info("collector_status columns: initialized, items_count")
 
 
 def _create_sort_indexes(session: Session):

@@ -594,12 +594,19 @@ def add_ai_push_report_items(session: Session, report_id: int, items: list[dict]
         vid = item.get("id")
         if not vid:
             continue
+        # disclosed_at_raw may be str or datetime
+        disclosed_val = item.get("disclosed_at_raw")
+        if isinstance(disclosed_val, str):
+            try:
+                disclosed_val = datetime.strptime(disclosed_val.replace(" UTC", ""), "%Y-%m-%d %H:%M:%S")
+            except ValueError:
+                disclosed_val = None
         row = AIPushReportItem(
             report_id=report_id,
             vulnerability_id=vid,
             vuln_key=item.get("key", ""),
             title=item.get("title", ""),
-            disclosed_at=item.get("disclosed_at_raw"),
+            disclosed_at=disclosed_val if isinstance(disclosed_val, datetime) else None,
             disclosed_source=item.get("disclosed_source", ""),
             action_value_score=item.get("action_value_score") or 0,
             cvss_score=item.get("cvss_score"),
