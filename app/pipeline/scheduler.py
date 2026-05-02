@@ -12,10 +12,15 @@ class SyncScheduler:
         self.sync_func = sync_func
         self.interval_minutes = interval_minutes
         self._paused = False
+        self._is_running = False
 
     @property
     def is_paused(self) -> bool:
         return self._paused
+
+    @property
+    def is_running(self) -> bool:
+        return self._is_running
 
     def start(self, run_immediately: bool = True):
         """Start the scheduler."""
@@ -27,6 +32,7 @@ class SyncScheduler:
             replace_existing=True,
         )
         self.scheduler.start()
+        self._is_running = True
         logger.info(
             f"Scheduler started (interval: {self.interval_minutes}min)"
         )
@@ -61,4 +67,5 @@ class SyncScheduler:
 
     def shutdown(self):
         self.scheduler.shutdown(wait=False)
+        self._is_running = False
         logger.info("Scheduler shut down")

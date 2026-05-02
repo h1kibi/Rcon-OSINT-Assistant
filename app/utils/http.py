@@ -46,6 +46,8 @@ def redact_url(url: str) -> str:
 def set_global_proxy(http_proxy: str = "", https_proxy: str = "", enabled: bool = False):
     """Set global proxy for all HTTP clients."""
     global _PROXY_URL, _PROXY_ENABLED
+    _PROXY_DECISIONS.clear()  # Invalidate cached decisions when proxy changes
+
     if enabled and (http_proxy or https_proxy):
         _PROXY_URL = https_proxy or http_proxy
         _PROXY_ENABLED = True
@@ -67,8 +69,8 @@ def _test_proxy():
             logger.debug("Proxy test OK")
         else:
             logger.warning(f"Proxy test failed: status {resp.status_code}")
-    except Exception as e:
-        logger.warning(f"Proxy test failed: {e}")
+    except Exception:
+        logger.warning("Proxy test failed: connection error")
 
 
 def _should_use_proxy(domain: str) -> bool:
@@ -171,7 +173,10 @@ class HTTPClient:
                     use_proxy = True
                     continue
                 wait = 2 ** attempt
-                logger.warning(f"Request failed for {safe_url}: {e}, retrying {wait}s (attempt {attempt}/{self.max_retries})")
+                logger.warning(
+                    f"Request failed for {safe_url}: {type(e).__name__}, "
+                    f"retrying {wait}s (attempt {attempt}/{self.max_retries})"
+                )
                 time.sleep(wait)
 
         raise last_error or RuntimeError(f"All retries exhausted for {safe_url}")

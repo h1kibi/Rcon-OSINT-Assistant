@@ -393,6 +393,24 @@ def main():
     collectors, epss_collector = build_collectors(settings)
     scorer_config = build_scorer(settings)
 
+    # Hot-reload refs — must be created BEFORE any function that calls get_settings()
+    _settings_ref = [settings]
+    _scorer_ref = [scorer_config]
+    _collectors_ref = [collectors]
+    _epss_ref = [epss_collector]
+
+    def get_settings():
+        return _settings_ref[0]
+
+    def get_scorer():
+        return _scorer_ref[0]
+
+    def get_collectors():
+        return _collectors_ref[0]
+
+    def get_epss():
+        return _epss_ref[0]
+
     # Main window
     main_window = MainWindow(lambda: get_session(), settings)
 
@@ -413,7 +431,7 @@ def main():
 
     badge_timer = QTimer()
     badge_timer.timeout.connect(update_badge)
-    badge_timer.start(15000)  # every 15s
+    badge_timer.start(15000)
 
     # Initial data load
     main_window.load_data()
@@ -423,24 +441,6 @@ def main():
     sync_signals = SyncSignals()
     sync_signals.sync_done.connect(main_window.load_data)
     sync_signals.sync_done.connect(update_badge)
-
-    # Settings hot-reload: use mutable container so closures see updates
-    _settings_ref = [settings]
-    _scorer_ref = [scorer_config]
-    _collectors_ref = [collectors]
-    _epss_ref = [epss_collector]
-
-    def get_settings():
-        return _settings_ref[0]
-
-    def get_scorer():
-        return _scorer_ref[0]
-
-    def get_collectors():
-        return _collectors_ref[0]
-
-    def get_epss():
-        return _epss_ref[0]
 
     def sync_func():
         main_window.load_data()
@@ -461,22 +461,29 @@ def main():
             e.http.close()
 
     def on_config_changed(new_config):
-        close_collectors(_collectors_ref[0], _epss_ref[0])
+        with sync_lock:
+            close_collectors(_collectors_ref[0], _epss_ref[0])
 
-        # Apply proxy first so new collectors use updated proxy
-        from app.utils.http import set_global_proxy
-        set_global_proxy(
-            http_proxy=new_config.proxy.http_proxy,
-            https_proxy=new_config.proxy.https_proxy,
-            enabled=new_config.proxy.enabled,
-        )
+            from app.utils.http import set_global_proxy
+            set_global_proxy(
+                http_proxy=new_config.proxy.http_proxy,
+                https_proxy=new_config.proxy.https_proxy,
+                enabled=new_config.proxy.enabled,
+            )
 
-        _settings_ref[0] = new_config
-        _scorer_ref[0] = build_scorer(new_config)
-        _collectors_ref[0], _epss_ref[0] = build_collectors(new_config)
+            _settings_ref[0] = new_config
+            _scorer_ref[0] = build_scorer(new_config)
+            _collectors_ref[0], _epss_ref[0] = build_collectors(new_config)
 
-        sync_scheduler.interval_minutes = new_config.app.refresh_interval_minutes
-        floating_ball._min_score = new_config.ui.min_score_to_badge
+            sync_scheduler.interval_minutes = new_config.app.refresh_interval_minutes
+            floating_ball._min_score = new_config.ui.min_score_to_badge
+
+            # Handle scheduler start/stop based on collector state
+            has_sources = bool(get_collectors())
+            if has_sources and not sync_scheduler.is_running:
+                sync_scheduler.start(run_immediately=False)
+            elif not has_sources and sync_scheduler.is_running:
+                sync_scheduler.shutdown()
 
     main_window.config_changed.connect(on_config_changed)
 
@@ -497,10 +504,15 @@ def main():
         lambda: _rescore_all(get_settings(), get_scorer())
     )
 
-    if settings.nvd.enabled or settings.cisa_kev.enabled:
+    # Sync lock: prevents collector replacement during active sync
+    sync_lock = threading.Lock()
+
+    # Start scheduler if any collectors are enabled
+    if get_collectors():
         sync_scheduler.start(run_immediately=False)
-        # Schedule first sync after event loop starts (non-blocking, in background)
         QTimer.singleShot(2000, sync_func)
+    else:
+        logger.info("No collectors enabled; periodic sync skipped")
 
     # Show main window
     if not settings.app.start_minimized:
