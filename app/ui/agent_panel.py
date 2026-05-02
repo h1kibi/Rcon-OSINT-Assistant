@@ -249,6 +249,16 @@ QLabel#promptDesc {{
     font-size: 12px;
 }}
 
+QLabel#promptBadge {{
+    color: #60a5fa;
+    background: rgba(96,165,250,0.12);
+    border: 1px solid rgba(96,165,250,0.28);
+    border-radius: 10px;
+    font-size: 10px;
+    font-weight: 700;
+    font-family: Consolas;
+}}
+
 /* RiskFeedCard */
 QFrame#riskFeedCard {{
     background: rgba(17,24,39,0.68);
@@ -319,7 +329,7 @@ class MetricPill(QFrame):
 class PromptCard(QFrame):
     clicked = Signal(str)
 
-    def __init__(self, title: str, desc: str, prompt: str, icon: str = "✨", parent=None):
+    def __init__(self, title: str, desc: str, prompt: str, badge: str = "", parent=None):
         super().__init__(parent)
         self.prompt = prompt
         self.setObjectName("promptCard")
@@ -330,7 +340,7 @@ class PromptCard(QFrame):
         layout.setContentsMargins(18, 16, 18, 16)
         layout.setSpacing(8)
 
-        head = QLabel(f"{icon}  {title}")
+        head = QLabel(title)
         head.setObjectName("promptTitle")
         layout.addWidget(head)
 
@@ -340,6 +350,13 @@ class PromptCard(QFrame):
         layout.addWidget(body)
 
         layout.addStretch(1)
+
+        if badge:
+            self._badge = QLabel(badge)
+            self._badge.setObjectName("promptBadge")
+            self._badge.setAlignment(Qt.AlignCenter)
+            self._badge.setFixedSize(36, 20)
+            layout.addWidget(self._badge, 0, Qt.AlignRight)
 
     def mousePressEvent(self, event):
         self.clicked.emit(self.prompt)
@@ -577,17 +594,17 @@ class AgentPanel(QWidget):
 
         prompts = [
             ("今日优先处置", "让 Rcon 汇总当前最值得优先修复的风险。",
-             "根据本地漏洞数据库，总结当前最值得优先处置的漏洞，并说明排序原因。", "🔥"),
+             "根据本地漏洞数据库，总结当前最值得优先处置的漏洞，并说明排序原因。", "P1"),
             ("KEV 命中分析", "查看存在在野利用证据的关键漏洞。",
-             "高危 Top10", "🎯"),
+             "高危 Top10", "KEV"),
             ("最近新增漏洞", "快速浏览最近同步进来的漏洞情报。",
-             "最近漏洞", "🛰️"),
+             "最近漏洞", "NEW"),
             ("修复优先级清单", "生成面向安全运营的处置建议。",
-             "请根据当前漏洞库生成一份修复优先级清单，按紧急程度分组，并给出修复建议。", "🛠️"),
+             "请根据当前漏洞库生成一份修复优先级清单，按紧急程度分组，并给出修复建议。", "FIX"),
         ]
 
-        for i, (p_title, desc, prompt, icon) in enumerate(prompts):
-            card = PromptCard(p_title, desc, prompt, icon)
+        for i, (p_title, desc, prompt, badge) in enumerate(prompts):
+            card = PromptCard(p_title, desc, prompt, badge)
             card.clicked.connect(self._send_prompt)
             prompt_grid.addWidget(card, i // 2, i % 2)
 
@@ -658,7 +675,7 @@ class AgentPanel(QWidget):
         cve_id = data.get("cve_id", "")
         if cve_id:
             self._show_chat()
-            self._append_user(cve_id)
+            self._append_user(f"分析 {cve_id} 的风险和修复建议")
             result = self.tools.cve(cve_id)
             content = str(result) if result else f"未找到 {cve_id}"
             self._history.append({"role": "assistant", "content": content})
@@ -728,7 +745,7 @@ class AgentPanel(QWidget):
         self._emit_tool_result(result)
 
     def _send(self, text: str):
-        if not text.strip() or self._busy:
+        if not text.strip() or self._busy or self._streaming:
             return
         self._show_chat()
         self._append_user(text)
