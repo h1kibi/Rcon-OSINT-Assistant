@@ -3,9 +3,9 @@ import random
 from PySide6.QtCore import Qt, QPoint, Signal, QTimer
 from PySide6.QtGui import (
     QPainter, QColor, QBrush, QPen, QFont, QRadialGradient,
-    QLinearGradient, QPainterPath, QPolygon
+    QLinearGradient, QPainterPath, QAction
 )
-from PySide6.QtWidgets import QWidget, QMenu, QApplication, QAction
+from PySide6.QtWidgets import QWidget, QMenu, QApplication
 
 
 class RobotOrb(QWidget):
