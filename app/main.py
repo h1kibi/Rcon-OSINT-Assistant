@@ -440,7 +440,10 @@ def main():
             logger.info("Sync already running; marked one pending")
             return
         try:
-            _run_sync(get_settings(), get_collectors(), get_epss(), get_scorer())
+            try:
+                _run_sync(get_settings(), get_collectors(), get_epss(), get_scorer())
+            except Exception as e:
+                logger.exception(f"Sync failed: {type(e).__name__}")
         finally:
             sync_lock.release()
             sync_signals.sync_done.emit()
