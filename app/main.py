@@ -560,6 +560,20 @@ def main():
     floating_ball.open_settings.connect(main_window._open_settings)
     floating_ball.ai_push_requested.connect(lambda: _open_ai_push())
 
+    def _open_ai_push():
+        try:
+            win = AIPushWindow(
+                session_factory=get_session,
+                config=get_settings(),
+                parent=main_window,
+            )
+            main_window._ai_push_window = win
+            win.show()
+            win.raise_()
+            win.activateWindow()
+        except Exception:
+            logger.exception("Open AI push failed")
+
     main_window.refresh_requested.connect(sync_func)
     main_window.rescore_requested.connect(
         lambda: _rescore_all(get_settings(), get_scorer())
@@ -626,21 +640,6 @@ def _rescore_all(settings, scorer_config):
         logger.error(f"Rescore failed: {e}")
     finally:
         session.close()
-
-
-def _open_ai_push():
-    try:
-        win = AIPushWindow(
-            session_factory=get_session,
-            config=get_settings(),
-            parent=main_window,
-        )
-        main_window._ai_push_window = win
-        win.show()
-        win.raise_()
-        win.activateWindow()
-    except Exception as e:
-        logger.exception("Open AI push failed")
 
 
 def _toggle_pause(ball, scheduler):
