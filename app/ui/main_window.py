@@ -702,6 +702,7 @@ class MainWindow(QMainWindow):
             self.btn_sidebar_agent.setStyleSheet(active_style["agent"])
             self._personal_mode = False
             self.content_stack.setCurrentIndex(1)
+            self.agent_panel.refresh_dashboard()
 
     def _set_status_by_vuln(self, vuln, status):
         vuln_id = vuln.get("id")

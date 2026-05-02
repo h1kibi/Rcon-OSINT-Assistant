@@ -123,9 +123,6 @@ def get_vulnerabilities(
         conditions.append(Vulnerability.description.contains(kw))
 
         stmt = stmt.where(or_(*conditions))
-        conditions.append(Vulnerability.description.contains(kw))
-
-        stmt = stmt.where(or_(*conditions))
     if source:
         subq_source = select(SourceRecord.vulnerability_id).where(
             SourceRecord.source.contains(source)
@@ -136,10 +133,18 @@ def get_vulnerabilities(
         else:
             return []
 
+    # Effective date for sorting: disclosed > published > first_seen
+    from sqlalchemy import func as sa_func
+    effective_date = sa_func.coalesce(
+        Vulnerability.disclosed_at,
+        Vulnerability.published_at,
+        Vulnerability.first_seen_at,
+    )
+
     # Sorting
     from sqlalchemy import case
 
-    # Ignored items always go to bottom regardless of sort
+    # Ignored items always go to bottom
     ignored_penalty = case(
         (Vulnerability.status == "ignored", -100000),
         else_=0,
@@ -154,10 +159,10 @@ def get_vulnerabilities(
         d30 = now - timedelta(days=30)
 
         recency_bonus = case(
-            (Vulnerability.published_at >= d1, 50),
-            (Vulnerability.published_at >= d3, 35),
-            (Vulnerability.published_at >= d7, 20),
-            (Vulnerability.published_at >= d30, 8),
+            (effective_date >= d1, 50),
+            (effective_date >= d3, 35),
+            (effective_date >= d7, 20),
+            (effective_date >= d30, 8),
             else_=0,
         )
         severity_group = case(
@@ -180,29 +185,25 @@ def get_vulnerabilities(
         order = smart_score.desc()
 
     elif sort == "date_desc":
-        # 时间优先：最新发布排最前
-        order = (Vulnerability.published_at + ignored_penalty).desc()
+        # Ignored last, then newest first
+        order = (Vulnerability.status == "ignored").asc(), effective_date.desc()
 
     elif sort == "date_asc":
-        order = (Vulnerability.published_at + ignored_penalty).asc()
+        order = (Vulnerability.status == "ignored").asc(), effective_date.asc()
 
     elif sort == "cvss_desc":
-        # CVSS优先：最高分排最前
-        order = (Vulnerability.cvss_score + ignored_penalty).desc()
+        order = (Vulnerability.status == "ignored").asc(), Vulnerability.cvss_score.desc()
 
     elif sort == "cvss_asc":
-        order = (Vulnerability.cvss_score + ignored_penalty).asc()
+        order = (Vulnerability.status == "ignored").asc(), Vulnerability.cvss_score.asc()
 
     elif sort == "score_asc":
-        order = (Vulnerability.action_value_score + ignored_penalty).asc()
+        order = (Vulnerability.status == "ignored").asc(), Vulnerability.action_value_score.asc()
 
     else:
-        # 默认/评分优先：最高分排最前
-        order = (Vulnerability.action_value_score + ignored_penalty).desc()
+        order = (Vulnerability.status == "ignored").asc(), Vulnerability.action_value_score.desc()
 
-    stmt = stmt.order_by(order)
-    stmt = stmt.offset(offset).limit(limit)
-    return list(session.exec(stmt).all())
+    stmt = stmt.order_by(*order) if isinstance(order, tuple) else stmt.order_by(order)
 
 
 def get_vulnerability_by_id(session: Session, vuln_id: int) -> Optional[Vulnerability]:

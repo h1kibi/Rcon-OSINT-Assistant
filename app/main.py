@@ -457,6 +457,8 @@ def main():
         """Unified post-sync handler: UI refresh, pending config, coalesced sync."""
         main_window.load_data()
         update_badge()
+        if hasattr(main_window, "agent_panel"):
+            main_window.agent_panel.refresh_dashboard()
 
         # Pending config wins over duplicate sync request
         cfg = _pending_config[0]

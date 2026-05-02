@@ -133,16 +133,30 @@ def query_database(db, query_type, params=None):
             h = session.exec(select(func.count(Vulnerability.id)).where(Vulnerability.action_value_score >= 80)).one()
             return {"total": t, "kev": k, "unread": u, "high": h}
         elif query_type == "recent":
-            vulns = session.exec(select(Vulnerability).order_by(Vulnerability.published_at.desc()).limit(8)).all()
+            from sqlalchemy import func as sa_func
+            from app.db.repositories import get_vulnerabilities
+            vulns = get_vulnerabilities(session, sort="date_desc", limit=8)
             return [{
-                "cve_id": v.cve_id, "title": v.title[:60], "severity": v.severity,
+                "cve_id": v.cve_id or v.ghsa_id, "title": v.title[:60], "severity": v.severity,
                 "cvss": v.cvss_score, "score": v.action_value_score,
                 "is_kev": v.is_kev, "has_poc": v.has_poc_signal,
             } for v in vulns]
+        elif query_type == "search":
+            kw = params.get("keyword", "") if params else ""
+            from app.db.repositories import get_vulnerabilities
+            vulns = get_vulnerabilities(session, keyword=kw, limit=10)
+            if not vulns:
+                return f"未找到 '{kw}' 相关漏洞"
+            lines = [f"搜索 '{kw}' ({len(vulns)} 条):"]
+            for v in vulns:
+                cid = v.cve_id or v.ghsa_id or v.osv_id or "N/A"
+                lines.append(f"{cid}  评分:{v.action_value_score:.0f}\n{v.title[:50]}")
+            return "\n---\n".join(lines)
         elif query_type == "top_risk":
-            vulns = session.exec(select(Vulnerability).order_by(Vulnerability.action_value_score.desc()).limit(8)).all()
+            from app.db.repositories import get_vulnerabilities
+            vulns = get_vulnerabilities(session, sort="score_desc", limit=8)
             return [{
-                "cve_id": v.cve_id, "title": v.title[:60], "severity": v.severity,
+                "cve_id": v.cve_id or v.ghsa_id, "title": v.title[:60], "severity": v.severity,
                 "cvss": v.cvss_score, "score": v.action_value_score,
                 "is_kev": v.is_kev, "has_poc": v.has_poc_signal,
             } for v in vulns]
@@ -524,9 +538,20 @@ class AgentPanel(QWidget):
         scroll.setWidget(page)
         return scroll
 
+    def _clear_vuln_list(self):
+        while self.vuln_list.count():
+            item = self.vuln_list.takeAt(0)
+            widget = item.widget()
+            if widget:
+                widget.deleteLater()
+
+    def refresh_dashboard(self):
+        self._load_dashboard()
+
     def _load_dashboard(self):
         """Load stats and recent vulns into dashboard cards."""
         try:
+            self._clear_vuln_list()
             stats = query_database(self.db, "stats")
             if isinstance(stats, dict):
                 self.card_total.set_value(stats["total"])
@@ -536,10 +561,15 @@ class AgentPanel(QWidget):
 
             vulns = query_database(self.db, "recent")
             if isinstance(vulns, list):
-                for v in vulns:
-                    card = VulnCard(v)
-                    card.clicked.connect(lambda d=v: self._on_vuln_click(d))
-                    self.vuln_list.addWidget(card)
+                if not vulns:
+                    empty = QLabel("暂无漏洞数据，等待同步完成后自动刷新")
+                    empty.setStyleSheet("color:#3d4450; font-size:13px; padding:16px;")
+                    self.vuln_list.addWidget(empty)
+                else:
+                    for v in vulns:
+                        card = VulnCard(v)
+                        card.clicked.connect(lambda d=v: self._on_vuln_click(d))
+                        self.vuln_list.addWidget(card)
         except Exception as e:
             logger.error(f"Dashboard load error: {e}")
 
