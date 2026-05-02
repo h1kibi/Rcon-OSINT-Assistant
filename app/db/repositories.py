@@ -494,12 +494,23 @@ def create_ai_push_report(session: Session, trigger_type: str) -> AIPushReport:
     return report
 
 
+def mark_ai_push_report_error(session: Session, report_id: int, error: str):
+    report = session.get(AIPushReport, report_id)
+    if not report:
+        return
+    report.status = "error"
+    report.error = error[:2000]
+    report.updated_at = _utcnow()
+    session.add(report)
+    session.commit()
+
+
 def save_ai_push_report_ready(
     session: Session, report_id: int, *, rule_content: str,
     ai_content: str, final_content: str, prompt: str,
     context_json: str, content_hash: str, model: str,
     candidate_count: int, high_risk_count: int,
-    new_high_risk_count: int, status: str,
+    new_high_risk_count: int, status: str, error: str = "",
 ):
     report = session.get(AIPushReport, report_id)
     if not report:
@@ -515,6 +526,8 @@ def save_ai_push_report_ready(
     report.high_risk_count = high_risk_count
     report.new_high_risk_count = new_high_risk_count
     report.status = status
+    if error:
+        report.error = error[:2000]
     report.generated_at = report.generated_at or _utcnow()
     if status == "ready_ai":
         report.optimized_at = _utcnow()

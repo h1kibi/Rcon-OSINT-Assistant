@@ -64,6 +64,9 @@ class AIPushManager(QObject):
                 latest = repo.get_latest_ai_push_report(session)
                 if not latest:
                     triggered = True
+                elif latest.status not in {"ready_rule", "ready_ai"}:
+                    # Error or queued report — retry
+                    triggered = True
                 elif repo.count_unalerted_high_risk_candidates(session) > 0:
                     triggered = True
                 elif latest.updated_at and _utcnow() - latest.updated_at >= timedelta(minutes=MIN_REPORT_INTERVAL_MINUTES):
@@ -82,8 +85,10 @@ class AIPushManager(QObject):
         self.generation_started.emit()
 
         session = self.session_factory()
+        report_id = None
         try:
             report = repo.create_ai_push_report(session, trigger_type=trigger_type)
+            report_id = report.id
             candidates = get_ai_push_candidates(session, limit=5, days=14)
             items = [build_vuln_push_payload(session, v) for v in candidates]
 
@@ -132,6 +137,11 @@ class AIPushManager(QObject):
             self._start_worker(report.id, agent_cfg, prompt, rule_md, context_json, items, new_count)
         except Exception as e:
             logger.exception("AI push generation failed")
+            if report_id:
+                try:
+                    repo.mark_ai_push_report_error(session, report_id, f"{type(e).__name__}: {e}")
+                except Exception:
+                    pass
             self._status = "idle"
             self.generation_failed.emit(str(e))
         finally:
@@ -177,6 +187,7 @@ class AIPushManager(QObject):
                 content_hash=content_hash, model="rule-based",
                 candidate_count=len(items), high_risk_count=len(items),
                 new_high_risk_count=new_count, status="ready_rule",
+                error=f"AI optimization failed: {err}",
             )
             repo.add_personal_library_report_entry(session, report_id, "AI推送：最新高危漏洞简报")
             self._status = "idle"
