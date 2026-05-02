@@ -1,5 +1,6 @@
 import time
 from typing import Any, Optional
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 import httpx
 from loguru import logger
 from app.utils.rate_limit import RateLimiter
@@ -7,14 +8,39 @@ from app.utils.rate_limit import RateLimiter
 # Global proxy config
 _PROXY_URL: Optional[str] = None
 _PROXY_ENABLED: bool = False
-# Cache: domain -> use_proxy (True/False)
 _PROXY_DECISIONS: dict[str, bool] = {}
 
+SENSITIVE_QUERY_KEYS = {
+    "api_key", "apikey", "access_token", "token",
+    "client_secret", "secret", "password", "passwd", "key",
+}
 
-def _redact_url(url: str) -> str:
-    """Redact username:password from URLs for logging."""
-    import re
-    return re.sub(r'://[^@]*@', '://***:***@', url)
+
+def redact_url(url: str) -> str:
+    """Redact sensitive credentials and query parameters from URLs."""
+    if not url:
+        return ""
+    try:
+        parts = urlsplit(url)
+        host = parts.hostname or ""
+        port = f":{parts.port}" if parts.port else ""
+
+        if parts.username or parts.password:
+            netloc = f"***:***@{host}{port}"
+        else:
+            netloc = f"{host}{port}"
+
+        safe_query_items = []
+        for key, value in parse_qsl(parts.query, keep_blank_values=True):
+            if key.lower() in SENSITIVE_QUERY_KEYS:
+                safe_query_items.append((key, "***"))
+            else:
+                safe_query_items.append((key, value))
+        safe_query = urlencode(safe_query_items, doseq=True)
+
+        return urlunsplit((parts.scheme, netloc, parts.path, safe_query, ""))
+    except Exception:
+        return "<redacted-url>"
 
 
 def set_global_proxy(http_proxy: str = "", https_proxy: str = "", enabled: bool = False):
@@ -23,8 +49,7 @@ def set_global_proxy(http_proxy: str = "", https_proxy: str = "", enabled: bool 
     if enabled and (http_proxy or https_proxy):
         _PROXY_URL = https_proxy or http_proxy
         _PROXY_ENABLED = True
-        logger.info(f"Proxy enabled: {_redact_url(_PROXY_URL)}")
-        # Test proxy connectivity
+        logger.info(f"Proxy enabled: {redact_url(_PROXY_URL)}")
         _test_proxy()
     else:
         _PROXY_URL = None
@@ -37,13 +62,9 @@ def _test_proxy():
     if not _PROXY_URL:
         return
     try:
-        resp = httpx.get(
-            "https://httpbin.org/ip",
-            proxy=_PROXY_URL,
-            timeout=5.0,
-        )
+        resp = httpx.get("https://httpbin.org/ip", proxy=_PROXY_URL, timeout=5.0)
         if resp.status_code == 200:
-            logger.info(f"Proxy test OK: {resp.json().get('origin', 'unknown')}")
+            logger.debug("Proxy test OK")
         else:
             logger.warning(f"Proxy test failed: status {resp.status_code}")
     except Exception as e:
@@ -54,12 +75,9 @@ def _should_use_proxy(domain: str) -> bool:
     """Decide whether to use proxy for a domain."""
     if not _PROXY_ENABLED or not _PROXY_URL:
         return False
-
-    # Check cache
     if domain in _PROXY_DECISIONS:
         return _PROXY_DECISIONS[domain]
 
-    # Test direct connection (short timeout)
     direct_ok = False
     try:
         resp = httpx.get(f"https://{domain}", timeout=3.0, follow_redirects=True)
@@ -69,18 +87,11 @@ def _should_use_proxy(domain: str) -> bool:
 
     if direct_ok:
         _PROXY_DECISIONS[domain] = False
-        logger.debug(f"Direct OK for {domain}, not using proxy")
         return False
 
-    # Direct failed, test proxy
     proxy_ok = False
     try:
-        resp = httpx.get(
-            f"https://{domain}",
-            proxy=_PROXY_URL,
-            timeout=5.0,
-            follow_redirects=True,
-        )
+        resp = httpx.get(f"https://{domain}", proxy=_PROXY_URL, timeout=5.0, follow_redirects=True)
         proxy_ok = resp.status_code < 500
     except Exception:
         proxy_ok = False
@@ -88,8 +99,6 @@ def _should_use_proxy(domain: str) -> bool:
     _PROXY_DECISIONS[domain] = proxy_ok
     if proxy_ok:
         logger.info(f"Using proxy for {domain}")
-    else:
-        logger.warning(f"Both direct and proxy failed for {domain}")
     return proxy_ok
 
 
@@ -124,7 +133,6 @@ class HTTPClient:
         self._clients: dict[str, httpx.Client] = {}
 
     def _get_client(self, use_proxy: bool) -> httpx.Client:
-        """Get or create client for proxy/direct mode."""
         key = "proxy" if use_proxy else "direct"
         if key not in self._clients:
             proxy = _PROXY_URL if use_proxy else None
@@ -138,6 +146,7 @@ class HTTPClient:
     def request(self, method: str, url: str, **kwargs) -> httpx.Response:
         last_error = None
         use_proxy = get_proxy_for_url(url) is not None
+        safe_url = redact_url(url)
 
         for attempt in range(1, self.max_retries + 1):
             self.rate_limiter.wait()
@@ -149,7 +158,7 @@ class HTTPClient:
                         retry_after = int(response.headers.get("Retry-After", 10))
                     except (ValueError, TypeError):
                         retry_after = 10
-                    logger.warning(f"Rate limited on {url}, waiting {retry_after}s")
+                    logger.warning(f"Rate limited on {safe_url}, waiting {retry_after}s")
                     time.sleep(retry_after)
                     continue
                 response.raise_for_status()
@@ -157,19 +166,15 @@ class HTTPClient:
             except (httpx.TimeoutException, httpx.ConnectError,
                     httpx.RemoteProtocolError) as e:
                 last_error = e
-                # On connection failure, try switching proxy mode
                 if not use_proxy and _PROXY_ENABLED:
-                    logger.info(f"Direct failed for {url}, trying proxy...")
+                    logger.info(f"Direct failed for {safe_url}, trying proxy...")
                     use_proxy = True
                     continue
                 wait = 2 ** attempt
-                logger.warning(
-                    f"Request failed for {url}: {e}, "
-                    f"retrying in {wait}s (attempt {attempt}/{self.max_retries})"
-                )
+                logger.warning(f"Request failed for {safe_url}: {e}, retrying {wait}s (attempt {attempt}/{self.max_retries})")
                 time.sleep(wait)
 
-        raise last_error or RuntimeError(f"All retries exhausted for {url}")
+        raise last_error or RuntimeError(f"All retries exhausted for {safe_url}")
 
     def get(self, url: str, **kwargs) -> httpx.Response:
         return self.request("GET", url, **kwargs)

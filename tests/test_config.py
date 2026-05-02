@@ -44,3 +44,19 @@ class TestLoadConfig:
         settings = load_config(p)
         assert settings.nvd.enabled is True
         assert settings.nvd.rate_limit_per_minute == 20
+
+    def test_env_json_list_overrides_toml(self, tmp_path, monkeypatch):
+        p = tmp_path / "config.toml"
+        p.write_text('[watch]\nkeywords = ["old"]\n', encoding="utf-8")
+        monkeypatch.setenv("SECINFO_WATCH__KEYWORDS", '["RCE", "auth bypass"]')
+
+        settings = load_config(p)
+        assert settings.watch.keywords == ["RCE", "auth bypass"]
+
+    def test_env_bool_overrides_toml(self, tmp_path, monkeypatch):
+        p = tmp_path / "config.toml"
+        p.write_text("[proxy]\nenabled = false\n", encoding="utf-8")
+        monkeypatch.setenv("SECINFO_PROXY__ENABLED", "true")
+
+        settings = load_config(p)
+        assert settings.proxy.enabled is True

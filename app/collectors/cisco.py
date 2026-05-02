@@ -52,14 +52,21 @@ class CiscoCollector(Collector):
 
             resp = self.http.get(self.base_url, headers=headers)
             data = resp.json()
+
             if isinstance(data, list):
-                for item in data[:self.max_records]:
-                    advisories.append(RawAdvisory(
-                        source=self.source_name,
-                        source_id=item.get("advisoryId", ""),
-                        source_type=self.source_type,
-                        raw_data=item,
-                    ))
+                items = data
+            elif isinstance(data, dict):
+                items = data.get("advisories") or data.get("advisory") or data.get("data") or []
+            else:
+                items = []
+
+            for item in items[:self.max_records]:
+                advisories.append(RawAdvisory(
+                    source=self.source_name,
+                    source_id=item.get("advisoryId", ""),
+                    source_type=self.source_type,
+                    raw_data=item,
+                ))
         except Exception as e:
             logger.warning(f"Cisco fetch failed: {e}")
 

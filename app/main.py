@@ -335,21 +335,23 @@ def main():
 
     # Create collectors
     def build_collectors(cfg):
-        c = {"nvd": NVDCollector(
-            api_key=cfg.nvd.api_key, base_url=cfg.nvd.base_url,
-            rate_limit_per_minute=cfg.nvd.rate_limit_per_minute,
-            initial_sync_days=cfg.nvd.initial_sync_days,
-            max_records=cfg.nvd.max_records,
-        )}
-        c["cisa_kev"] = CisaKevCollector(base_url=cfg.cisa_kev.base_url)
+        c = {}
         epss = EPSSCollector(base_url=cfg.epss.base_url) if cfg.epss.enabled else None
 
+        if cfg.nvd.enabled:
+            c["nvd"] = NVDCollector(
+                api_key=cfg.nvd.api_key, base_url=cfg.nvd.base_url,
+                rate_limit_per_minute=cfg.nvd.rate_limit_per_minute,
+                initial_sync_days=cfg.nvd.initial_sync_days,
+                max_records=cfg.nvd.max_records,
+            )
+        if cfg.cisa_kev.enabled:
+            c["cisa_kev"] = CisaKevCollector(base_url=cfg.cisa_kev.base_url)
+            c["cisa_rss"] = CisaRssCollector(max_records=200)
         if cfg.github_advisory.enabled:
             c["github_advisory"] = GitHubAdvisoryCollector(token=cfg.github_advisory.token, max_records=1000)
         if cfg.osv.enabled:
             c["osv"] = OSVCollector(base_url=cfg.osv.base_url, max_records=500)
-        if cfg.cisa_kev.enabled:
-            c["cisa_rss"] = CisaRssCollector(max_records=200)
         if cfg.msrc.enabled:
             c["msrc"] = MSRCCollector(api_key=cfg.msrc.api_key, max_records=300)
         if cfg.cisco.enabled:
@@ -369,25 +371,27 @@ def main():
 
         return c, epss
 
-    collectors, epss_collector = build_collectors(settings)
+    def build_scorer(cfg):
+        return ScorerConfig(
+            kev_weight=cfg.scoring.kev_weight,
+            epss_95_weight=cfg.scoring.epss_95_weight,
+            epss_85_weight=cfg.scoring.epss_85_weight,
+            cvss_critical_weight=cfg.scoring.cvss_critical_weight,
+            cvss_high_weight=cfg.scoring.cvss_high_weight,
+            recent_24h_weight=cfg.scoring.recent_24h_weight,
+            recent_7d_weight=cfg.scoring.recent_7d_weight,
+            official_confirmed_weight=cfg.scoring.official_confirmed_weight,
+            patch_available_weight=cfg.scoring.patch_available_weight,
+            poc_signal_weight=cfg.scoring.poc_signal_weight,
+            multi_source_confirmed_weight=cfg.scoring.multi_source_confirmed_weight,
+            watch_keyword_weight=cfg.scoring.watch_keyword_weight,
+            watch_keywords=cfg.watch.keywords,
+            watch_vendors=cfg.watch.vendors,
+            watch_products=cfg.watch.products,
+        )
 
-    scorer_config = ScorerConfig(
-        kev_weight=settings.scoring.kev_weight,
-        epss_95_weight=settings.scoring.epss_95_weight,
-        epss_85_weight=settings.scoring.epss_85_weight,
-        cvss_critical_weight=settings.scoring.cvss_critical_weight,
-        cvss_high_weight=settings.scoring.cvss_high_weight,
-        recent_24h_weight=settings.scoring.recent_24h_weight,
-        recent_7d_weight=settings.scoring.recent_7d_weight,
-        official_confirmed_weight=settings.scoring.official_confirmed_weight,
-        patch_available_weight=settings.scoring.patch_available_weight,
-        poc_signal_weight=settings.scoring.poc_signal_weight,
-        multi_source_confirmed_weight=settings.scoring.multi_source_confirmed_weight,
-        watch_keyword_weight=settings.scoring.watch_keyword_weight,
-        watch_keywords=settings.watch.keywords,
-        watch_vendors=settings.watch.vendors,
-        watch_products=settings.watch.products,
-    )
+    collectors, epss_collector = build_collectors(settings)
+    scorer_config = build_scorer(settings)
 
     # Main window
     main_window = MainWindow(lambda: get_session(), settings)
@@ -449,42 +453,30 @@ def main():
     )
 
     # Connect config hot-reload
-    def on_config_changed(new_config):
-        # Close old collectors
-        old_c = _collectors_ref[0]
-        old_e = _epss_ref[0]
-        for c in old_c.values():
-            if hasattr(c, "http"):
-                c.http.close()
-        if old_e and hasattr(old_e, "http"):
-            old_e.http.close()
+    def close_collectors(c, e):
+        for v in c.values():
+            if hasattr(v, "http"):
+                v.http.close()
+        if e and hasattr(e, "http"):
+            e.http.close()
 
-        # Rebuild from new config
+    def on_config_changed(new_config):
+        close_collectors(_collectors_ref[0], _epss_ref[0])
+
+        # Apply proxy first so new collectors use updated proxy
+        from app.utils.http import set_global_proxy
+        set_global_proxy(
+            http_proxy=new_config.proxy.http_proxy,
+            https_proxy=new_config.proxy.https_proxy,
+            enabled=new_config.proxy.enabled,
+        )
+
         _settings_ref[0] = new_config
         _scorer_ref[0] = build_scorer(new_config)
         _collectors_ref[0], _epss_ref[0] = build_collectors(new_config)
 
         sync_scheduler.interval_minutes = new_config.app.refresh_interval_minutes
         floating_ball._min_score = new_config.ui.min_score_to_badge
-
-    def build_scorer(cfg):
-        return ScorerConfig(
-            kev_weight=cfg.scoring.kev_weight,
-            epss_95_weight=cfg.scoring.epss_95_weight,
-            epss_85_weight=cfg.scoring.epss_85_weight,
-            cvss_critical_weight=cfg.scoring.cvss_critical_weight,
-            cvss_high_weight=cfg.scoring.cvss_high_weight,
-            recent_24h_weight=cfg.scoring.recent_24h_weight,
-            recent_7d_weight=cfg.scoring.recent_7d_weight,
-            official_confirmed_weight=cfg.scoring.official_confirmed_weight,
-            patch_available_weight=cfg.scoring.patch_available_weight,
-            poc_signal_weight=cfg.scoring.poc_signal_weight,
-            multi_source_confirmed_weight=cfg.scoring.multi_source_confirmed_weight,
-            watch_keyword_weight=cfg.scoring.watch_keyword_weight,
-            watch_keywords=cfg.watch.keywords,
-            watch_vendors=cfg.watch.vendors,
-            watch_products=cfg.watch.products,
-        )
 
     main_window.config_changed.connect(on_config_changed)
 
@@ -517,11 +509,7 @@ def main():
     exit_code = app.exec()
 
     sync_scheduler.shutdown()
-    for c in collectors.values():
-        if hasattr(c, "http"):
-            c.http.close()
-    if epss_collector and hasattr(epss_collector, "http"):
-        epss_collector.http.close()
+    close_collectors(get_collectors(), get_epss())
     sys.exit(exit_code)
 
 

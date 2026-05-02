@@ -190,14 +190,29 @@ _CONFIG_MODELS = {
 }
 
 
+import json
+from pydantic import TypeAdapter
+
+
+def _parse_env_value(raw: str, annotation) -> Any:
+    """Parse env var string to the target pydantic type."""
+    try:
+        decoded = json.loads(raw)
+    except json.JSONDecodeError:
+        decoded = raw
+    return TypeAdapter(annotation).validate_python(decoded)
+
+
 def _collect_env_overrides(section_name: str, model_cls: type[BaseModel]) -> dict[str, Any]:
     """Collect only env vars that are actually present for a config section."""
     prefix = f"SECINFO_{section_name.upper()}__"
     overrides: dict[str, Any] = {}
-    for field in model_cls.model_fields.keys():
-        env_name = f"{prefix}{field.upper()}"
+    for field_name, field_info in model_cls.model_fields.items():
+        env_name = f"{prefix}{field_name.upper()}"
         if env_name in os.environ:
-            overrides[field] = os.environ[env_name]
+            overrides[field_name] = _parse_env_value(
+                os.environ[env_name], field_info.annotation
+            )
     return overrides
 
 
