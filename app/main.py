@@ -334,60 +334,42 @@ def main():
         app.setWindowIcon(QIcon(str(icon_path)))
 
     # Create collectors
-    nvd_collector = NVDCollector(
-        api_key=settings.nvd.api_key,
-        base_url=settings.nvd.base_url,
-        rate_limit_per_minute=settings.nvd.rate_limit_per_minute,
-        initial_sync_days=settings.nvd.initial_sync_days,
-        max_records=settings.nvd.max_records,
-    )
-    kev_collector = CisaKevCollector(base_url=settings.cisa_kev.base_url)
-    epss_collector = EPSSCollector(base_url=settings.epss.base_url)
-    gh_collector = GitHubAdvisoryCollector(
-        token=settings.github_advisory.token,
-        max_records=1000,
-    )
-    osv_collector = OSVCollector(base_url=settings.osv.base_url, max_records=500)
-    cisa_rss_collector = CisaRssCollector(max_records=200)
-    msrc_collector = MSRCCollector(api_key=settings.msrc.api_key, max_records=300)
-    cisco_collector = CiscoCollector(
-        client_id=settings.cisco.client_id,
-        client_secret=settings.cisco.client_secret,
-        max_records=300,
-    )
-    redhat_collector = RedHatCollector(max_records=300)
-    ubuntu_collector = UbuntuCollector(max_records=200)
-    debian_collector = DebianCollector(max_records=300)
-    cnvd_collector = CNVDCollector(max_records=200)
-    cnnvd_collector = CNNVDCollector(max_records=200)
-    cn_vendor_collector = ChineseVendorCollector(max_records=200)
+    def build_collectors(cfg):
+        c = {"nvd": NVDCollector(
+            api_key=cfg.nvd.api_key, base_url=cfg.nvd.base_url,
+            rate_limit_per_minute=cfg.nvd.rate_limit_per_minute,
+            initial_sync_days=cfg.nvd.initial_sync_days,
+            max_records=cfg.nvd.max_records,
+        )}
+        c["cisa_kev"] = CisaKevCollector(base_url=cfg.cisa_kev.base_url)
+        epss = EPSSCollector(base_url=cfg.epss.base_url) if cfg.epss.enabled else None
 
-    collectors = {
-        "nvd": nvd_collector,
-        "cisa_kev": kev_collector,
-    }
-    if settings.github_advisory.enabled:
-        collectors["github_advisory"] = gh_collector
-    if settings.osv.enabled:
-        collectors["osv"] = osv_collector
-    if settings.cisa_kev.enabled:
-        collectors["cisa_rss"] = cisa_rss_collector
-    if settings.msrc.enabled:
-        collectors["msrc"] = msrc_collector
-    if settings.cisco.enabled:
-        collectors["cisco"] = cisco_collector
-    if settings.redhat.enabled:
-        collectors["redhat"] = redhat_collector
-    if settings.ubuntu.enabled:
-        collectors["ubuntu"] = ubuntu_collector
-    if settings.debian.enabled:
-        collectors["debian"] = debian_collector
-    if settings.cnvd.enabled:
-        collectors["cnvd"] = cnvd_collector
-    if settings.cnnvd.enabled:
-        collectors["cnnvd"] = cnnvd_collector
-    if settings.cn_vendor.enabled:
-        collectors["cn_vendor"] = cn_vendor_collector
+        if cfg.github_advisory.enabled:
+            c["github_advisory"] = GitHubAdvisoryCollector(token=cfg.github_advisory.token, max_records=1000)
+        if cfg.osv.enabled:
+            c["osv"] = OSVCollector(base_url=cfg.osv.base_url, max_records=500)
+        if cfg.cisa_kev.enabled:
+            c["cisa_rss"] = CisaRssCollector(max_records=200)
+        if cfg.msrc.enabled:
+            c["msrc"] = MSRCCollector(api_key=cfg.msrc.api_key, max_records=300)
+        if cfg.cisco.enabled:
+            c["cisco"] = CiscoCollector(client_id=cfg.cisco.client_id, client_secret=cfg.cisco.client_secret, max_records=300)
+        if cfg.redhat.enabled:
+            c["redhat"] = RedHatCollector(max_records=300)
+        if cfg.ubuntu.enabled:
+            c["ubuntu"] = UbuntuCollector(max_records=200)
+        if cfg.debian.enabled:
+            c["debian"] = DebianCollector(max_records=300)
+        if cfg.cnvd.enabled:
+            c["cnvd"] = CNVDCollector(max_records=200)
+        if cfg.cnnvd.enabled:
+            c["cnnvd"] = CNNVDCollector(max_records=200)
+        if cfg.cn_vendor.enabled:
+            c["cn_vendor"] = ChineseVendorCollector(max_records=200)
+
+        return c, epss
+
+    collectors, epss_collector = build_collectors(settings)
 
     scorer_config = ScorerConfig(
         kev_weight=settings.scoring.kev_weight,
@@ -441,6 +423,8 @@ def main():
     # Settings hot-reload: use mutable container so closures see updates
     _settings_ref = [settings]
     _scorer_ref = [scorer_config]
+    _collectors_ref = [collectors]
+    _epss_ref = [epss_collector]
 
     def get_settings():
         return _settings_ref[0]
@@ -448,40 +432,59 @@ def main():
     def get_scorer():
         return _scorer_ref[0]
 
+    def get_collectors():
+        return _collectors_ref[0]
+
+    def get_epss():
+        return _epss_ref[0]
+
     def sync_func():
         main_window.load_data()
         update_badge()
-        _run_sync_async(get_settings(), collectors, epss_collector, get_scorer(), sync_signals)
+        _run_sync_async(get_settings(), get_collectors(), get_epss(), get_scorer(), sync_signals)
 
     sync_scheduler = SyncScheduler(
-        lambda: _run_sync(get_settings(), collectors, epss_collector, get_scorer()),
+        lambda: _run_sync(get_settings(), get_collectors(), get_epss(), get_scorer()),
         interval_minutes=get_settings().app.refresh_interval_minutes,
     )
 
     # Connect config hot-reload
     def on_config_changed(new_config):
+        # Close old collectors
+        old_c = _collectors_ref[0]
+        old_e = _epss_ref[0]
+        for c in old_c.values():
+            if hasattr(c, "http"):
+                c.http.close()
+        if old_e and hasattr(old_e, "http"):
+            old_e.http.close()
+
+        # Rebuild from new config
         _settings_ref[0] = new_config
-        _scorer_ref[0] = ScorerConfig(
-            kev_weight=new_config.scoring.kev_weight,
-            epss_95_weight=new_config.scoring.epss_95_weight,
-            epss_85_weight=new_config.scoring.epss_85_weight,
-            cvss_critical_weight=new_config.scoring.cvss_critical_weight,
-            cvss_high_weight=new_config.scoring.cvss_high_weight,
-            recent_24h_weight=new_config.scoring.recent_24h_weight,
-            recent_7d_weight=new_config.scoring.recent_7d_weight,
-            official_confirmed_weight=new_config.scoring.official_confirmed_weight,
-            patch_available_weight=new_config.scoring.patch_available_weight,
-            poc_signal_weight=new_config.scoring.poc_signal_weight,
-            multi_source_confirmed_weight=new_config.scoring.multi_source_confirmed_weight,
-            watch_keyword_weight=new_config.scoring.watch_keyword_weight,
-            watch_keywords=new_config.watch.keywords,
-            watch_vendors=new_config.watch.vendors,
-            watch_products=new_config.watch.products,
-        )
-        # Update refresh interval
+        _scorer_ref[0] = build_scorer(new_config)
+        _collectors_ref[0], _epss_ref[0] = build_collectors(new_config)
+
         sync_scheduler.interval_minutes = new_config.app.refresh_interval_minutes
-        # Update badge threshold
         floating_ball._min_score = new_config.ui.min_score_to_badge
+
+    def build_scorer(cfg):
+        return ScorerConfig(
+            kev_weight=cfg.scoring.kev_weight,
+            epss_95_weight=cfg.scoring.epss_95_weight,
+            epss_85_weight=cfg.scoring.epss_85_weight,
+            cvss_critical_weight=cfg.scoring.cvss_critical_weight,
+            cvss_high_weight=cfg.scoring.cvss_high_weight,
+            recent_24h_weight=cfg.scoring.recent_24h_weight,
+            recent_7d_weight=cfg.scoring.recent_7d_weight,
+            official_confirmed_weight=cfg.scoring.official_confirmed_weight,
+            patch_available_weight=cfg.scoring.patch_available_weight,
+            poc_signal_weight=cfg.scoring.poc_signal_weight,
+            multi_source_confirmed_weight=cfg.scoring.multi_source_confirmed_weight,
+            watch_keyword_weight=cfg.scoring.watch_keyword_weight,
+            watch_keywords=cfg.watch.keywords,
+            watch_vendors=cfg.watch.vendors,
+            watch_products=cfg.watch.products,
+        )
 
     main_window.config_changed.connect(on_config_changed)
 
@@ -495,13 +498,11 @@ def main():
         lambda: _toggle_pause(floating_ball, sync_scheduler)
     )
     floating_ball.refresh_now.connect(sync_func)
-    floating_ball.open_settings.connect(
-        lambda: _show_settings(settings, main_window, scorer_config)
-    )
+    floating_ball.open_settings.connect(main_window._open_settings)
 
     main_window.refresh_requested.connect(sync_func)
     main_window.rescore_requested.connect(
-        lambda: _rescore_all(settings, scorer_config)
+        lambda: _rescore_all(get_settings(), get_scorer())
     )
 
     if settings.nvd.enabled or settings.cisa_kev.enabled:
@@ -578,38 +579,3 @@ def _toggle_pause(ball, scheduler):
         ball.set_paused(True)
 
 
-def _show_settings(settings, main_window, scorer_config):
-    from app.ui.settings_dialog import SettingsDialog
-    from app.db import repositories as repo
-
-    session = get_session()
-    prefs = repo.get_preferences(session)
-    prefs_dict = {
-        "refresh_interval_minutes": prefs.refresh_interval_minutes,
-        "min_score_to_badge": prefs.min_score_to_badge,
-        "min_score_to_notify": prefs.min_score_to_notify,
-        "quiet_hours_enabled": prefs.quiet_hours_enabled,
-        "quiet_hours_start": prefs.quiet_hours_start,
-        "quiet_hours_end": prefs.quiet_hours_end,
-        "watch_keywords": prefs.watch_keywords.split(",") if prefs.watch_keywords else [],
-    }
-    session.close()
-
-    dlg = SettingsDialog(settings, prefs_dict)
-    if dlg.exec():
-        result = dlg.get_result()
-        session = get_session()
-        repo.update_preferences(
-            session,
-            refresh_interval_minutes=result.get("refresh_interval_minutes"),
-            min_score_to_badge=result.get("min_score_to_badge"),
-            min_score_to_notify=result.get("min_score_to_notify"),
-            quiet_hours_enabled=result.get("quiet_hours_enabled"),
-            quiet_hours_start=result.get("quiet_hours_start"),
-            quiet_hours_end=result.get("quiet_hours_end"),
-            watch_keywords=",".join(result.get("watch_keywords", [])),
-        )
-        if result.get("watch_keywords"):
-            scorer_config.watch_keywords = result["watch_keywords"]
-        session.close()
-        main_window.load_data()

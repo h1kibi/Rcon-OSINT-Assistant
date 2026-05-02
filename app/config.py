@@ -1,5 +1,6 @@
+import os
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -189,34 +190,47 @@ _CONFIG_MODELS = {
 }
 
 
+def _collect_env_overrides(section_name: str, model_cls: type[BaseModel]) -> dict[str, Any]:
+    """Collect only env vars that are actually present for a config section."""
+    prefix = f"SECINFO_{section_name.upper()}__"
+    overrides: dict[str, Any] = {}
+    for field in model_cls.model_fields.keys():
+        env_name = f"{prefix}{field.upper()}"
+        if env_name in os.environ:
+            overrides[field] = os.environ[env_name]
+    return overrides
+
+
 def load_config(config_path: Optional[Path] = None) -> Settings:
-    """Load configuration from TOML file, then merge with environment variables."""
+    """Load configuration from TOML file (base), env vars (override).
+
+    Priority: env var > TOML > model default
+    Each section is independent: TOML provides base values,
+    and only explicitly set env vars override them.
+    """
     settings = Settings()
 
+    # Find first available config file
     if config_path is None:
-        candidates = [
-            Path("config.toml"),
-            Path("config.example.toml"),
-        ]
+        candidates = [Path("config.toml"), Path("config.example.toml")]
     else:
         candidates = [config_path]
 
+    config_data: dict[str, Any] = {}
     for path in candidates:
         if path.exists():
             try:
                 import tomllib
             except ImportError:
                 import tomli as tomllib
-            data = tomllib.loads(path.read_text(encoding="utf-8"))
-
-            for section_name, model_cls in _CONFIG_MODELS.items():
-                if section_name in data:
-                    section_data = data[section_name]
-                    # TOML provides base, env vars override (higher priority)
-                    current = getattr(settings, section_name)
-                    current_dict = current.model_dump()
-                    merged = {**section_data, **current_dict}
-                    setattr(settings, section_name, model_cls(**merged))
+            config_data = tomllib.loads(path.read_text(encoding="utf-8"))
             break
+
+    # Merge per section: TOML base + env overrides
+    for section_name, model_cls in _CONFIG_MODELS.items():
+        base = config_data.get(section_name, {})
+        env_overrides = _collect_env_overrides(section_name, model_cls)
+        merged = {**base, **env_overrides}
+        setattr(settings, section_name, model_cls(**merged))
 
     return settings

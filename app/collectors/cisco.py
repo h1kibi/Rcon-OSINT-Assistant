@@ -1,5 +1,6 @@
 """Cisco PSIRT openVuln collector."""
 import json
+import time
 from datetime import datetime, timezone
 from loguru import logger
 from app.collectors.base import Collector, RawAdvisory, NormalizedVulnerability
@@ -18,11 +19,12 @@ class CiscoCollector(Collector):
         self.http = HTTPClient(rate_per_minute=10)
         self.base_url = "https://apix.cisco.com/security/advisories/v2/all"
         self.token = None
+        self.token_expires_at = 0
         self.client_id = client_id
         self.client_secret = client_secret
 
     def _get_token(self):
-        if self.token:
+        if self.token and time.time() < self.token_expires_at:
             return self.token
         try:
             resp = self.http.post(
@@ -30,10 +32,13 @@ class CiscoCollector(Collector):
                 data={"grant_type": "client_credentials"},
                 auth=(self.client_id, self.client_secret),
             )
-            self.token = resp.json().get("access_token")
+            payload = resp.json()
+            self.token = payload.get("access_token")
+            expires_in = int(payload.get("expires_in", 3600))
+            self.token_expires_at = time.time() + expires_in - 60
             return self.token
         except Exception as e:
-            logger.error(f"Cisco token failed: {e}")
+            logger.warning(f"Cisco token failed: {e}")
             return None
 
     def fetch_since(self, since_time: datetime | None = None) -> list[RawAdvisory]:

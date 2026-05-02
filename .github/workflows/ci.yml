@@ -22,7 +22,8 @@ jobs:
       - name: Lint with ruff
         run: |
           pip install ruff
-          ruff check app/ --ignore=F401,E501
+          ruff check app/ tests/
+          ruff format --check app/ tests/
 
   secret-scan:
     runs-on: ubuntu-latest
