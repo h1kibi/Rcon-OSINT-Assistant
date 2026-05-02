@@ -25,7 +25,16 @@ dev = [
     "pytest>=8.0.0",
     "pytest-asyncio>=0.23.0",
     "pytest-httpx>=0.30.0",
+    "ruff>=0.5.0",
+    "pre-commit>=3.7.0",
 ]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+[tool.ruff.lint]
+ignore = ["F401", "E501"]
 
 [tool.setuptools.packages.find]
 include = ["app*"]

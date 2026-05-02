@@ -309,14 +309,17 @@ def main():
     finally:
         session.close()
 
-    # Seed mock data
-    session = get_session()
-    try:
-        _seed_mock_data(session)
-    except Exception as e:
-        logger.warning(f"Mock data seeding: {e}")
-    finally:
-        session.close()
+    # Seed mock data (only in dev mode)
+    if "--dev" in sys.argv:
+        session = get_session()
+        try:
+            _seed_mock_data(session)
+        except Exception as e:
+            logger.warning(f"Mock data seeding: {e}")
+        finally:
+            session.close()
+    else:
+        logger.info("Production mode: mock data skipped")
 
     # PySide6 App
     app = QApplication(sys.argv)
@@ -347,7 +350,11 @@ def main():
     osv_collector = OSVCollector(base_url=settings.osv.base_url, max_records=500)
     cisa_rss_collector = CisaRssCollector(max_records=200)
     msrc_collector = MSRCCollector(api_key=settings.msrc.api_key, max_records=300)
-    cisco_collector = CiscoCollector(max_records=300)
+    cisco_collector = CiscoCollector(
+        client_id=settings.cisco.client_id,
+        client_secret=settings.cisco.client_secret,
+        max_records=300,
+    )
     redhat_collector = RedHatCollector(max_records=300)
     ubuntu_collector = UbuntuCollector(max_records=200)
     debian_collector = DebianCollector(max_records=300)
@@ -379,8 +386,8 @@ def main():
         collectors["cnvd"] = cnvd_collector
     if settings.cnnvd.enabled:
         collectors["cnnvd"] = cnnvd_collector
-    # Chinese vendor advisories always enabled
-    collectors["cn_vendor"] = cn_vendor_collector
+    if settings.cn_vendor.enabled:
+        collectors["cn_vendor"] = cn_vendor_collector
 
     scorer_config = ScorerConfig(
         kev_weight=settings.scoring.kev_weight,

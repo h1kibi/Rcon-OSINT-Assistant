@@ -31,6 +31,7 @@ class RobotOrb(QWidget):
         self._hovered = False
         self._dragging = False
         self._drag_pos = None
+        self._drag_start = None
 
         # Animation
         self._phase = 0.0
@@ -305,6 +306,7 @@ class RobotOrb(QWidget):
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:
             self._dragging = True
+            self._drag_start = event.globalPosition().toPoint()
             self._drag_pos = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
 
     def mouseMoveEvent(self, event):
@@ -313,13 +315,10 @@ class RobotOrb(QWidget):
 
     def mouseReleaseEvent(self, event):
         if event.button() == Qt.LeftButton:
-            dist = 0
-            if self._drag_pos:
-                dist = (event.globalPosition().toPoint() -
-                        self._drag_pos - self.frameGeometry().topLeft()).manhattanLength()
+            dist = (event.globalPosition().toPoint() - self._drag_start).manhattanLength()
             self._dragging = False
             self._drag_pos = None
-            if dist < 5:
+            if dist < 10:
                 self.open_main.emit()
 
     def contextMenuEvent(self, event):
