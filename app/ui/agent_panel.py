@@ -1,7 +1,11 @@
-"""Rcon AI Panel — pixel-hacker terminal workspace for vulnerability intelligence."""
+"""Rcon AI Panel — pixel-hacker terminal workspace with multi-session chat."""
 
 import json
 import re
+from dataclasses import dataclass, field
+from datetime import datetime
+from uuid import uuid4
+
 from PySide6.QtCore import Qt, Signal, QThread, QTimer
 from PySide6.QtGui import QColor, QFont
 from PySide6.QtWidgets import (
@@ -21,6 +25,28 @@ from app.ui.fonts import pixel_font, mono_font, text_font
 CENTER_MAX_WIDTH = 1320
 COMPOSER_MAX_WIDTH = 1180
 
+
+# ─── Session Data ─────────────────────────────────────────────────────
+@dataclass
+class ChatMessage:
+    role: str
+    content: str
+
+
+@dataclass
+class ChatSession:
+    id: str
+    title: str
+    messages: list[ChatMessage] = field(default_factory=list)
+    history: list[dict] = field(default_factory=list)
+    created_at: datetime = field(default_factory=datetime.now)
+    updated_at: datetime = field(default_factory=datetime.now)
+
+    @property
+    def is_empty(self) -> bool:
+        return not self.messages
+
+
 AGENT_STYLE = """
 QWidget#agentPanel {
     background: qlineargradient(
@@ -30,36 +56,53 @@ QWidget#agentPanel {
     color: #d6ffd6;
 }
 
-QFrame#agentTopBar {
+QFrame#sessionBar {
     background: qlineargradient(
         x1:0, y1:0, x2:1, y2:0,
-        stop:0 #050805, stop:0.55 #071007, stop:1 #050805
+        stop:0 #040704, stop:0.45 #061006, stop:1 #040704
     );
-    border-bottom: 1px solid #123818;
+    border-bottom: 1px solid #15451f;
 }
 
-QLabel#agentTitle {
+QScrollArea#sessionScroll {
+    background: transparent;
+    border: none;
+}
+
+QPushButton#sessionTab {
+    background: #071007;
+    color: #77d982;
+    border: 1px solid #15451f;
+    border-radius: 4px;
+    padding: 5px 12px;
+    text-align: left;
+}
+
+QPushButton#sessionTab:hover {
     color: #d6ffd6;
-    font-size: 15px;
-    font-weight: 700;
+    border: 1px solid #39ff14;
+    background: #0a140a;
 }
 
-QLabel#agentSubtitle {
-    color: #7edb8d;
-    font-size: 11px;
+QPushButton#sessionTab:checked {
+    color: #39ff14;
+    border: 1px solid #39ff14;
+    background: qlineargradient(
+        x1:0, y1:0, x2:1, y2:0,
+        stop:0 #0a140a, stop:1 #0d180d
+    );
 }
 
-QPushButton#newChatBtn {
+QPushButton#newSessionBtn {
     background: #071007;
     color: #39ff14;
-    border: 1px solid #1ed760;
+    border: 1px solid #39ff14;
     border-radius: 4px;
-    padding: 7px 18px;
+    padding: 6px 18px;
 }
 
-QPushButton#newChatBtn:hover {
-    background: #0b160b;
-    border: 1px solid #39ff14;
+QPushButton#newSessionBtn:hover {
+    background: #102010;
 }
 
 QWidget#agentPanel QFrame#assistantBubble {
@@ -457,15 +500,101 @@ class AgentPanel(QWidget):
         self._busy = False
         self._request_id = 0
 
+        self._sessions: dict[str, ChatSession] = {}
+        self._session_order: list[str] = []
+        self._current_session_id: str | None = None
+
         self.tools = AgentToolService(db_session_factory)
         self.agent_service = AgentService(lambda: self.config, self.tools)
 
         self._build_ui()
         self._apply_style()
+        self._new_session(initial=True)
         self._load_dashboard()
 
     def set_current_vuln(self, v):
         self._current_vuln = v
+
+    # ── Session Helpers ──────────────────────────────────────────────
+    def _current_session(self) -> ChatSession:
+        if not self._current_session_id or self._current_session_id not in self._sessions:
+            self._new_session(initial=True)
+        return self._sessions[self._current_session_id]
+
+    def _new_session(self, initial: bool = False):
+        if not initial and (self._busy or self._streaming):
+            return
+        sid = uuid4().hex[:10]
+        idx = len(self._session_order) + 1
+        session = ChatSession(id=sid, title=f"SESSION_{idx:02d}")
+        self._sessions[sid] = session
+        self._session_order.append(sid)
+        self._switch_session(sid)
+
+    def _switch_session(self, session_id: str):
+        if session_id not in self._sessions:
+            return
+        if self._busy or self._streaming:
+            return
+        self._request_id += 1
+        if self._current_stream:
+            self._current_stream.cancel()
+            self._current_stream = None
+        self._current_session_id = session_id
+        self._render_session_tabs()
+        self._render_current_session()
+
+    def _render_session_tabs(self):
+        while self.session_tabs_layout.count():
+            item = self.session_tabs_layout.takeAt(0)
+            widget = item.widget()
+            if widget:
+                widget.deleteLater()
+        for sid in self._session_order:
+            session = self._sessions[sid]
+            btn = QPushButton(session.title)
+            btn.setObjectName("sessionTab")
+            btn.setCheckable(True)
+            btn.setChecked(sid == self._current_session_id)
+            btn.setCursor(Qt.PointingHandCursor)
+            btn.setMinimumWidth(132)
+            btn.setMaximumWidth(190)
+            btn.setFixedHeight(34)
+            btn.setFont(pixel_font(9, bold=True))
+            btn.clicked.connect(lambda _, x=sid: self._switch_session(x))
+            self.session_tabs_layout.addWidget(btn)
+        self.session_tabs_layout.addStretch(1)
+
+    def _clear_chat_widgets(self):
+        while self.chat_layout.count() > 1:
+            item = self.chat_layout.takeAt(0)
+            widget = item.widget()
+            if widget:
+                widget.deleteLater()
+
+    def _render_current_session(self):
+        session = self._current_session()
+        self._clear_chat_widgets()
+        if session.is_empty:
+            self.dashboard.show()
+            self.chat_scroll.hide()
+            self.chip_frame.show()
+            self._load_dashboard()
+            return
+        self.dashboard.hide()
+        self.chat_scroll.show()
+        self.chip_frame.hide()
+        for msg in session.messages:
+            self._append_message(msg.role, msg.content, animate=False)
+        QTimer.singleShot(20, lambda: smooth_scroll_to_bottom(self.chat_scroll, duration=80))
+
+    def _maybe_update_session_title(self, session: ChatSession, first_user_text: str):
+        if session.title.startswith("SESSION_"):
+            clean = " ".join(first_user_text.strip().split())
+            clean = clean.replace("\n", " ")
+            if len(clean) > 18:
+                clean = clean[:18] + "..."
+            session.title = clean or session.title
 
     # ── Build UI ────────────────────────────────────────────────────
     def _build_ui(self):
@@ -473,37 +602,8 @@ class AgentPanel(QWidget):
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
 
-        # ── Top Bar ────────────────────────────────────────────────
-        top = QFrame()
-        top.setObjectName("agentTopBar")
-        top.setFixedHeight(52)
-        tb = QHBoxLayout(top)
-        tb.setContentsMargins(24, 0, 16, 0)
-
-        title_block = QVBoxLayout()
-        title_block.setSpacing(2)
-
-        title = QLabel("RCON_AI")
-        title.setObjectName("agentTitle")
-        title.setFont(pixel_font(14, bold=True))
-        title_block.addWidget(title)
-
-        sub = QLabel("local vuln intel assistant")
-        sub.setObjectName("agentSubtitle")
-        sub.setFont(mono_font(10))
-        title_block.addWidget(sub)
-
-        tb.addLayout(title_block)
-        tb.addStretch()
-
-        self.btn_new = QPushButton("+ NEW")
-        self.btn_new.setObjectName("newChatBtn")
-        self.btn_new.setCursor(Qt.PointingHandCursor)
-        self.btn_new.setFont(pixel_font(9, bold=True))
-        self.btn_new.clicked.connect(self._clear)
-        tb.addWidget(self.btn_new)
-
-        root.addWidget(top)
+        # ── Session Bar ────────────────────────────────────────────
+        root.addWidget(self._build_session_bar())
 
         # ── Content Stack ──────────────────────────────────────────
         self.content_stack = QWidget()
@@ -529,7 +629,7 @@ class AgentPanel(QWidget):
 
         root.addWidget(self.content_stack, 1)
 
-        # ── Chip Area (self-contained width) ───────────────────────
+        # ── Chip Area ──────────────────────────────────────────────
         chip_wrap = QFrame()
         chip_wrap.setObjectName("chipWrap")
         outer = QHBoxLayout(chip_wrap)
@@ -560,7 +660,7 @@ class AgentPanel(QWidget):
         self.chip_frame = chip_wrap
         root.addWidget(self.chip_frame)
 
-        # ── Composer (wider, terminal style) ───────────────────────
+        # ── Composer ───────────────────────────────────────────────
         composer_wrap = QFrame()
         composer_wrap.setObjectName("composerWrap")
         wrap_l = QHBoxLayout(composer_wrap)
@@ -581,6 +681,40 @@ class AgentPanel(QWidget):
         wrap_l.addStretch(1)
 
         root.addWidget(composer_wrap)
+
+    def _build_session_bar(self):
+        bar = QFrame()
+        bar.setObjectName("sessionBar")
+        bar.setFixedHeight(54)
+
+        layout = QHBoxLayout(bar)
+        layout.setContentsMargins(18, 8, 18, 8)
+        layout.setSpacing(10)
+
+        self.session_scroll = QScrollArea()
+        self.session_scroll.setObjectName("sessionScroll")
+        self.session_scroll.setWidgetResizable(True)
+        self.session_scroll.setFrameShape(QFrame.NoFrame)
+        self.session_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.session_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+
+        self.session_tabs_container = QWidget()
+        self.session_tabs_layout = QHBoxLayout(self.session_tabs_container)
+        self.session_tabs_layout.setContentsMargins(0, 0, 0, 0)
+        self.session_tabs_layout.setSpacing(8)
+        self.session_tabs_layout.addStretch(1)
+
+        self.session_scroll.setWidget(self.session_tabs_container)
+        layout.addWidget(self.session_scroll, 1)
+
+        self.btn_new = QPushButton("+ NEW")
+        self.btn_new.setObjectName("newSessionBtn")
+        self.btn_new.setCursor(Qt.PointingHandCursor)
+        self.btn_new.setFont(pixel_font(9, bold=True))
+        self.btn_new.clicked.connect(lambda: self._new_session())
+        layout.addWidget(self.btn_new)
+
+        return bar
 
     def _build_hero_card(self):
         hero = QFrame()
@@ -632,7 +766,6 @@ class AgentPanel(QWidget):
         main_row = QHBoxLayout()
         main_row.setSpacing(18)
 
-        # ── Left Column (7/12) ──────────────────────────────────────
         left_col = QVBoxLayout()
         left_col.setSpacing(14)
 
@@ -671,7 +804,6 @@ class AgentPanel(QWidget):
         left_col.addLayout(prompt_grid)
         left_col.addStretch(1)
 
-        # ── Right Column (5/12) ─────────────────────────────────────
         right_col = QVBoxLayout()
         right_col.setSpacing(12)
 
@@ -744,10 +876,13 @@ class AgentPanel(QWidget):
         cve_id = data.get("cve_id", "")
         if cve_id:
             self._show_chat()
-            self._append_user(f"分析 {cve_id} 的风险和修复建议")
+            self._append_user_text(f"分析 {cve_id} 的风险和修复建议")
             result = self.tools.cve(cve_id)
             content = str(result) if result else f"未找到 {cve_id}"
-            self._history.append({"role": "assistant", "content": content})
+            session = self._current_session()
+            session.messages.append(ChatMessage("assistant", content))
+            session.history.append({"role": "assistant", "content": content})
+            session.updated_at = datetime.now()
             self._stream_assistant(content)
 
     # ── Style ───────────────────────────────────────────────────────
@@ -761,31 +896,26 @@ class AgentPanel(QWidget):
     # ── Message Helpers ─────────────────────────────────────────────
     def _show_chat(self):
         self.dashboard.hide()
-        self.chip_frame.hide()
         self.chat_scroll.show()
+        self.chip_frame.hide()
 
-    def _append_user(self, text: str):
-        msg = ChatMessageWidget("user")
+    def _append_message(self, role: str, text: str, animate: bool = True) -> ChatMessageWidget:
+        msg = ChatMessageWidget(role)
         msg.set_text(text)
         idx = max(0, self.chat_layout.count() - 1)
         self.chat_layout.insertWidget(idx, msg)
-        QTimer.singleShot(0, lambda: animate_message_in(msg))
-        QTimer.singleShot(30, lambda: smooth_scroll_to_bottom(self.chat_scroll))
-
-    def _append_assistant(self, text: str = "") -> ChatMessageWidget:
-        msg = ChatMessageWidget("assistant")
-        if text:
-            msg.set_text(text)
-        idx = max(0, self.chat_layout.count() - 1)
-        self.chat_layout.insertWidget(idx, msg)
-        QTimer.singleShot(0, lambda: animate_message_in(msg))
+        if animate:
+            QTimer.singleShot(0, lambda: animate_message_in(msg))
         QTimer.singleShot(30, lambda: smooth_scroll_to_bottom(self.chat_scroll))
         return msg
+
+    def _append_user_text(self, text: str):
+        self._append_message("user", text)
 
     # ── Streaming ───────────────────────────────────────────────────
     def _stream_assistant(self, text: str):
         self._streaming = True
-        msg = self._append_assistant()
+        msg = self._append_message("assistant", "")
         self._current_ai_msg = msg
         renderer = TypewriterRenderer(msg, self)
         self._current_stream = renderer
@@ -804,7 +934,13 @@ class AgentPanel(QWidget):
         if not qtype:
             return
         self._show_chat()
-        self._append_user(f"[{label}]")
+        self._append_user_text(f"[{label}]")
+
+        session = self._current_session()
+        session.messages.append(ChatMessage("user", f"[{label}]"))
+        session.history.append({"role": "user", "content": f"[{label}]"})
+        session.updated_at = datetime.now()
+
         if qtype == "stats":
             result = self.tools.stats()
         elif qtype == "recent":
@@ -814,11 +950,20 @@ class AgentPanel(QWidget):
         self._emit_tool_result(result)
 
     def _send(self, text: str):
-        if not text.strip() or self._busy or self._streaming:
+        text = text.strip()
+        if not text or self._busy or self._streaming:
             return
+
+        session = self._current_session()
         self._show_chat()
-        self._append_user(text)
-        self._history.append({"role": "user", "content": text})
+
+        session.messages.append(ChatMessage("user", text))
+        session.history.append({"role": "user", "content": text})
+        session.updated_at = datetime.now()
+
+        self._append_message("user", text)
+        self._maybe_update_session_title(session, text)
+        self._render_session_tabs()
 
         db_result = self._try_db(text)
         if db_result is not None:
@@ -837,7 +982,7 @@ class AgentPanel(QWidget):
             return result if result else f"未在本地数据库中找到 {cve_id}。"
         first_sentence = re.split(r"[。！？\n]", normalized, maxsplit=1)[0]
         short_query = len(normalized) <= 24
-        no_context = len(self._history) <= 1
+        no_context = len(self._current_session().history) <= 1
         allow_tool = short_query or no_context
         def starts_with_any(words):
             return any(first_sentence.startswith(w) for w in words)
@@ -857,40 +1002,56 @@ class AgentPanel(QWidget):
             content = json.dumps(result, ensure_ascii=False, indent=2)
         else:
             content = str(result)
-        self._history.append({"role": "assistant", "content": content})
+        session = self._current_session()
+        session.messages.append(ChatMessage("assistant", content))
+        session.history.append({"role": "assistant", "content": content})
+        session.updated_at = datetime.now()
         self._stream_assistant(content)
 
-    def _call_ai(self, msg):
+    def _call_ai(self, text: str):
         cfg = getattr(self.config, "agent", None)
         if not cfg or not getattr(cfg, "api_key", ""):
-            self._stream_assistant("[!] 未配置 API Key，请在设置 → Agent 配置中设置。")
+            self._emit_tool_result("[!] 未配置 API Key，请在设置 → Agent 配置中设置。")
             return
+
+        session = self._current_session()
         self._busy = True
         self._request_id += 1
         request_id = self._request_id
+        session_id = session.id
+
         self.composer.set_generating(True)
-        thinking = self._append_assistant("正在思考…")
-        self._worker = AgentWorker(self.agent_service, self._history[-10:])
+        thinking = self._append_message("assistant", "正在思考…")
+
+        self._worker = AgentWorker(self.agent_service, session.history[-10:])
         self._worker.response_ready.connect(
-            lambda text, rid=request_id: self._on_ai_ok(rid, thinking, text)
+            lambda text, rid=request_id, sid=session_id: self._on_ai_ok(rid, sid, thinking, text)
         )
         self._worker.error_occurred.connect(
-            lambda err, rid=request_id: self._on_ai_err(rid, thinking, err)
+            lambda err, rid=request_id, sid=session_id: self._on_ai_err(rid, sid, thinking, err)
         )
         self._worker.start()
 
-    def _on_ai_ok(self, request_id: int, thinking_widget: ChatMessageWidget, resp: str):
-        if request_id != self._request_id:
+    def _on_ai_ok(self, request_id: int, session_id: str, thinking_widget, text: str):
+        if request_id != self._request_id or session_id != self._current_session_id:
             return
         thinking_widget.deleteLater()
-        self._history.append({"role": "assistant", "content": resp})
-        self._stream_assistant(resp)
+        session = self._sessions[session_id]
+        session.messages.append(ChatMessage("assistant", text))
+        session.history.append({"role": "assistant", "content": text})
+        session.updated_at = datetime.now()
+        self._stream_assistant(text)
 
-    def _on_ai_err(self, request_id: int, thinking_widget: ChatMessageWidget, err: str):
-        if request_id != self._request_id:
+    def _on_ai_err(self, request_id: int, session_id: str, thinking_widget, err: str):
+        if request_id != self._request_id or session_id != self._current_session_id:
             return
         thinking_widget.deleteLater()
-        self._stream_assistant(f"[!] {err}")
+        content = f"[!] {err}"
+        session = self._sessions[session_id]
+        session.messages.append(ChatMessage("assistant", content))
+        session.history.append({"role": "assistant", "content": content})
+        session.updated_at = datetime.now()
+        self._stream_assistant(content)
 
     def _on_stream_finished(self):
         self._streaming = False
