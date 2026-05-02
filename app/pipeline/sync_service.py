@@ -135,13 +135,25 @@ def run_sync_service(
         )
         saved = repo.upsert_vulnerability(session, vuln)
 
-        # Save source record (dedup by vuln+source)
+        # Save source record with timeline data
+        primary_url = ""
+        if nv.references:
+            for ref in nv.references:
+                url = ref.get("url", "")
+                if url and url.startswith("http"):
+                    primary_url = url
+                    break
+
         repo.save_source_record(session, SourceRecord(
             vulnerability_id=saved.id,
             source=nv.source,
             source_id=nv.primary_key_id,
             source_type="api",
             raw_json=nv.raw_json,
+            published_at=nv.published_at,
+            modified_at=nv.modified_at,
+            title=nv.title[:300] if nv.title else "",
+            url=primary_url,
             fetched_at=_utcnow(),
         ))
 

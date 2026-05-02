@@ -10,7 +10,7 @@ from PySide6.QtWidgets import (
 )
 from sqlmodel import Session, select
 from app.db import repositories as repo
-from app.db.models import AffectedProduct, VulnerabilityReference
+from app.db.models import AffectedProduct, VulnerabilityReference, SourceRecord
 from app.ui.models import VulnerabilityTableModel
 from app.ui.detail_window import DetailWindow
 from app.ui.agent_panel import AgentPanel
@@ -387,9 +387,21 @@ class MainWindow(QMainWindow):
                     all_refs.setdefault(r.vulnerability_id, []).append(r)
 
             self._all_data = []
+            # Pre-load all source records
+            all_sources = {}
+            if vuln_ids:
+                srcs = session.exec(
+                    select(SourceRecord).where(
+                        SourceRecord.vulnerability_id.in_(vuln_ids)
+                    ).order_by(SourceRecord.fetched_at.desc())
+                ).all()
+                for s in srcs:
+                    all_sources.setdefault(s.vulnerability_id, []).append(s)
+
             for v in vulns:
                 products = all_products.get(v.id, [])
                 refs = all_refs.get(v.id, [])
+                sources = all_sources.get(v.id, [])
                 self._all_data.append({
                     "id": v.id,
                     "cve_id": v.cve_id,
@@ -412,8 +424,12 @@ class MainWindow(QMainWindow):
                     "source_confidence_score": v.source_confidence_score,
                     "action_value_score": v.action_value_score,
                     "action_value_reason": v.action_value_reason,
+                    "disclosed_at": v.disclosed_at,
+                    "disclosed_source": v.disclosed_source,
                     "published_at": str(v.published_at) if v.published_at else None,
                     "modified_at": str(v.modified_at) if v.modified_at else None,
+                    "first_seen_at": str(v.first_seen_at) if v.first_seen_at else None,
+                    "last_seen_at": str(v.last_seen_at) if v.last_seen_at else None,
                     "status": v.status,
                     "affected_products": [
                         {"vendor": p.vendor, "product": p.product or p.package_name,
@@ -426,6 +442,7 @@ class MainWindow(QMainWindow):
                         {"url": r.url, "source": r.source, "tags": r.tags}
                         for r in refs
                     ],
+                    "source_records": sources,
                 })
 
             self.table_model.set_data(self._all_data)

@@ -34,6 +34,8 @@ class Vulnerability(SQLModel, table=True):
     source: str = Field(default="", index=True)
     action_value_score: float = Field(default=0.0, index=True)
     action_value_reason: str = Field(default="")
+    disclosed_at: Optional[datetime] = Field(default=None, index=True)
+    disclosed_source: str = Field(default="")
     published_at: Optional[datetime] = Field(default=None, index=True)
     modified_at: Optional[datetime] = Field(default=None)
     first_seen_at: Optional[datetime] = Field(default=None)
@@ -84,6 +86,10 @@ class SourceRecord(SQLModel, table=True):
     source_type: str = Field(default="")
     raw_json: str = Field(default="")
     raw_html: str = Field(default="")
+    published_at: Optional[datetime] = Field(default=None, index=True)
+    modified_at: Optional[datetime] = Field(default=None)
+    url: str = Field(default="")
+    title: str = Field(default="")
     fetched_at: datetime = Field(default_factory=_utcnow)
 
 

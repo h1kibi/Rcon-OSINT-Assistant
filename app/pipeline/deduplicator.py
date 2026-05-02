@@ -53,6 +53,23 @@ def _merge_group(key: str, items: list[NormalizedVulnerability]) -> NormalizedVu
         for cpe in v.cpe_list:
             merged_cpes.add(cpe)
 
+    # Compute earliest published_at across all sources
+    published_candidates = [
+        (v.published_at, v.source)
+        for v in items
+        if v.published_at is not None
+    ]
+    if published_candidates:
+        earliest_time, earliest_source = min(published_candidates, key=lambda x: x[0])
+        best.disclosed_at = earliest_time
+        best.disclosed_source = earliest_source
+        best.published_at = earliest_time
+
+    # Compute latest modified_at
+    modified_dates = [v.modified_at for v in items if v.modified_at]
+    if modified_dates:
+        best.modified_at = max(modified_dates)
+
     for v in items:
         if not best.title and v.title:
             best.title = v.title

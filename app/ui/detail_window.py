@@ -459,9 +459,23 @@ PoC: {'是' if v.get('has_poc_signal') else '否'}
             ("公开 PoC", "是" if vuln.get("has_poc_signal") else "否"),
             ("数据来源", vuln.get("source", "-")),
             ("来源可信度", f"{vuln.get('source_confidence_score', 50):.0f}%"),
-            ("发布时间", str(vuln.get("published_at", "-"))[:10]),
             ("当前状态", vuln.get("status", "-")),
         ])
+
+        # Time section
+        self._add_section("时间信息", [
+            ("最早公开时间", _fmt_dt(vuln.get("disclosed_at"))),
+            ("时间来源", vuln.get("disclosed_source", "-")),
+            ("主来源发布时间", _fmt_dt(vuln.get("published_at"))),
+            ("最后更新时间", _fmt_dt(vuln.get("modified_at"))),
+            ("本地首次发现", _fmt_dt(vuln.get("first_seen_at"))),
+            ("本地最后看到", _fmt_dt(vuln.get("last_seen_at"))),
+        ])
+
+        # Source timeline
+        source_records = vuln.get("source_records", [])
+        if source_records:
+            self._add_source_timeline(source_records)
 
         reason_text = vuln.get("action_value_reason", "")
         if reason_text:
@@ -552,3 +566,31 @@ PoC: {'是' if v.get('has_poc_signal') else '否'}
             btn.clicked.connect(lambda _, u=url: QDesktopServices.openUrl(QUrl(u)))
             layout.addWidget(btn)
         self.content_layout.addWidget(group)
+
+    def _add_source_timeline(self, records):
+        lines = []
+        for r in records:
+            source = getattr(r, "source", r.get("source", "")) if isinstance(r, dict) else getattr(r, "source", "")
+            pub = _fmt_dt(getattr(r, "published_at", None) if not isinstance(r, dict) else r.get("published_at"))
+            mod = _fmt_dt(getattr(r, "modified_at", None) if not isinstance(r, dict) else r.get("modified_at"))
+            fetch = _fmt_dt(getattr(r, "fetched_at", None) if not isinstance(r, dict) else r.get("fetched_at"))
+            url = getattr(r, "url", "") if not isinstance(r, dict) else r.get("url", "")
+            lines.append(f"{source}\n  发布: {pub}\n  更新: {mod}\n  抓取: {fetch}\n  链接: {url}")
+
+        if lines:
+            self._add_text_section("来源时间线", "\n\n".join(lines))
+
+
+from datetime import datetime, timezone
+
+
+def _fmt_dt(value) -> str:
+    if not value:
+        return "-"
+    if isinstance(value, str):
+        return value.replace("T", " ").replace("Z", " UTC")
+    if isinstance(value, datetime):
+        if value.tzinfo is None:
+            return value.strftime("%Y-%m-%d %H:%M:%S UTC")
+        return value.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+    return str(value)
