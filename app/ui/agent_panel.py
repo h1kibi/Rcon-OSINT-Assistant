@@ -1,15 +1,189 @@
+"""Rcon AI Panel — immersive chat experience for vulnerability intelligence."""
+
+import json
 import re
-from PySide6.QtCore import Qt, Signal, QThread, QTimer, QObject
-from PySide6.QtGui import QColor, QPainter, QPen, QBrush, QFont, QPainterPath
+from PySide6.QtCore import Qt, Signal, QThread, QTimer
+from PySide6.QtGui import QColor, QFont
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QTextEdit,
-    QPushButton, QFrame, QLineEdit, QApplication, QSizePolicy,
-    QGraphicsDropShadowEffect, QScrollArea, QGridLayout
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
+    QFrame, QApplication, QSizePolicy, QGraphicsDropShadowEffect,
+    QScrollArea,
 )
 from loguru import logger
 
+from app.ui.chat_widgets import ChatMessageWidget, ChatComposer, render_markdown
+from app.ui.chat_animations import animate_message_in, smooth_scroll_to_bottom, TypewriterRenderer
 
-# ─── Worker ───────────────────────────────────────────────────────
+
+# ─── Colors (scoped to agent panel) ──────────────────────────────────
+C = {
+    "bg":        "#0b0d12",
+    "bg2":       "#0f1219",
+    "surface":   "#111827",
+    "surface2":  "#1a2332",
+    "card":      "#111827",
+    "card_hover":"#1a2536",
+    "border":    "#1f2937",
+    "border2":   "#243044",
+    "blue":      "#3b82f6",
+    "blue2":     "#2563eb",
+    "blue_dim":  "#1e3a5f",
+    "green":     "#22c55e",
+    "red":       "#ef4444",
+    "orange":    "#f59e0b",
+    "text":      "#e5e7eb",
+    "text2":     "#9ca3af",
+    "text3":     "#4b5563",
+    "white":     "#f9fafb",
+}
+
+AGENT_STYLE = f"""
+QWidget#agentPanel {{
+    background: {C['bg']};
+    color: {C['text']};
+    font-family: "Microsoft YaHei", "Inter", "Segoe UI";
+}}
+
+QFrame#agentTopBar {{
+    background: rgba(11, 13, 18, 0.96);
+    border-bottom: 1px solid {C['border']};
+}}
+
+QLabel#agentTitle {{
+    color: {C['text']};
+    font-size: 15px;
+    font-weight: 700;
+}}
+
+QLabel#agentSubtitle {{
+    color: {C['text2']};
+    font-size: 12px;
+}}
+
+QWidget#agentPanel QFrame#assistantBubble {{
+    background: {C['surface']};
+    border: 1px solid {C['border2']};
+    border-radius: 18px;
+}}
+
+QWidget#agentPanel QFrame#userBubble {{
+    background: qlineargradient(x1:0,y1:0,x2:1,y2:1,
+        stop:0 {C['blue2']}, stop:1 #7c3aed);
+    border: none;
+    border-radius: 18px;
+}}
+
+QWidget#agentPanel QLabel#userAvatar {{
+    color: {C['bg']};
+    background: {C['text']};
+    border-radius: 15px;
+    font-weight: 800;
+}}
+
+QWidget#agentPanel QLabel#assistantAvatar {{
+    color: white;
+    background: qlineargradient(x1:0,y1:0,x2:1,y2:1,
+        stop:0 #38bdf8, stop:1 #8b5cf6);
+    border-radius: 15px;
+    font-weight: 800;
+}}
+
+QWidget#agentPanel QTextBrowser#messageBody {{
+    background: transparent;
+    color: {C['text']};
+    border: none;
+    font-size: 14px;
+    line-height: 150%;
+}}
+
+QWidget#agentPanel QFrame#composerWrap {{
+    background: {C['bg']};
+    border-top: 1px solid {C['border']};
+}}
+
+QWidget#agentPanel QFrame#composerShell {{
+    background: {C['surface']};
+    border: 1px solid {C['border2']};
+    border-radius: 24px;
+}}
+
+QWidget#agentPanel QTextEdit#composerInput {{
+    background: transparent;
+    color: {C['text']};
+    border: none;
+    font-size: 14px;
+    padding: 2px;
+}}
+
+QWidget#agentPanel QPushButton#sendCircle {{
+    background: {C['text']};
+    color: {C['bg']};
+    border: none;
+    border-radius: 19px;
+    font-size: 18px;
+    font-weight: 800;
+}}
+
+QWidget#agentPanel QPushButton#sendCircle:hover {{
+    background: #dbeafe;
+}}
+
+QWidget#agentPanel QPushButton#newBtn {{
+    background: {C['surface']};
+    color: {C['blue']};
+    border: 1px solid {C['border2']};
+    border-radius: 14px;
+    padding: 5px 16px;
+    font-size: 12px;
+}}
+
+QWidget#agentPanel QPushButton#newBtn:hover {{
+    background: {C['surface2']};
+    border-color: {C['blue']};
+}}
+
+QWidget#agentPanel QPushButton#linkBtn {{
+    background: transparent;
+    color: {C['blue']};
+    border: none;
+    font-size: 12px;
+}}
+
+QWidget#agentPanel QPushButton#linkBtn:hover {{ color: {C['text']}; }}
+
+QWidget#agentPanel QFrame#chipFrame {{
+    background: {C['bg']};
+    border-top: 1px solid {C['border']};
+}}
+
+QWidget#agentPanel QPushButton#chipBtn {{
+    background: {C['surface']};
+    color: {C['text2']};
+    border: 1px solid {C['border']};
+    border-radius: 16px;
+    padding: 7px 16px;
+    font-size: 12px;
+}}
+
+QWidget#agentPanel QPushButton#chipBtn:hover {{
+    background: {C['surface2']};
+    color: {C['text']};
+    border-color: {C['blue_dim']};
+}}
+
+QWidget#agentPanel QScrollArea {{ background: {C['bg']}; border: none; }}
+QWidget#agentPanel QScrollBar:vertical {{
+    background: {C['bg']}; width: 5px; border: none;
+}}
+QWidget#agentPanel QScrollBar::handle:vertical {{
+    background: {C['border2']}; border-radius: 2px; min-height: 30px;
+}}
+QWidget#agentPanel QScrollBar::handle:vertical:hover {{ background: {C['text3']}; }}
+QWidget#agentPanel QScrollBar::add-line:vertical, QWidget#agentPanel QScrollBar::sub-line:vertical {{ height: 0; }}
+"""
+
+
+# ─── Agent Worker (will be extracted in Commit 2) ───────────────────
 class AgentWorker(QThread):
     response_ready = Signal(str)
     error_occurred = Signal(str)
@@ -43,7 +217,7 @@ class AgentWorker(QThread):
         if resp.status_code != 200:
             try:
                 detail = resp.json().get("error", {}).get("message", resp.text[:200])
-            except:
+            except Exception:
                 detail = resp.text[:200]
             raise Exception(f"API {resp.status_code}: {detail}")
         result = resp.json()
@@ -59,68 +233,13 @@ class AgentWorker(QThread):
         if resp.status_code != 200:
             try:
                 detail = resp.json().get("error", {}).get("message", resp.text[:200])
-            except:
+            except Exception:
                 detail = resp.text[:200]
             raise Exception(f"API {resp.status_code}: {detail}")
         self.response_ready.emit(resp.json()["content"][0]["text"])
 
 
-# ─── Stream Animator ──────────────────────────────────────────────
-class StreamAnimator(QObject):
-    chunk_ready = Signal(str)
-    finished = Signal()
-
-    def __init__(self):
-        super().__init__()
-        self._text = ""
-        self._idx = 0
-        self._timer = QTimer()
-        self._timer.timeout.connect(self._tick)
-
-    def start(self, text, speed_ms=8):
-        self._text = text
-        self._idx = 0
-        self._timer.start(speed_ms)
-
-    def _tick(self):
-        if self._idx < len(self._text):
-            end = min(self._idx + 3, len(self._text))
-            self.chunk_ready.emit(self._text[self._idx:end])
-            self._idx = end
-        else:
-            self._timer.stop()
-            self.finished.emit()
-
-    def stop(self):
-        self._timer.stop()
-        self._text = ""
-        self._idx = 0
-
-
-# ─── Colors ───────────────────────────────────────────────────────
-C = {
-    "bg":        "#0b0f19",
-    "bg2":       "#0f1520",
-    "surface":   "#131a28",
-    "surface2":  "#182030",
-    "card":      "#141c2b",
-    "card_hover":"#1a2536",
-    "border":    "#1c2940",
-    "border2":   "#253550",
-    "blue":      "#3b82f6",
-    "blue2":     "#2563eb",
-    "blue_dim":  "#1e3a5f",
-    "green":     "#22c55e",
-    "red":       "#ef4444",
-    "orange":    "#f59e0b",
-    "text":      "#e2e8f0",
-    "text2":     "#94a3b8",
-    "text3":     "#475569",
-    "white":     "#ffffff",
-}
-
-
-# ─── Database Query ───────────────────────────────────────────────
+# ─── Database Query (will be extracted in Commit 2) ─────────────────
 def query_database(db, query_type, params=None):
     from app.db.models import Vulnerability
     from sqlmodel import select, func
@@ -143,7 +262,7 @@ def query_database(db, query_type, params=None):
         elif query_type == "search":
             kw = (params.get("keyword", "") if params else "").strip()
             if not kw:
-                return "请输入要搜索的关键词，例如 CVE、组件名、厂商或漏洞标题。"
+                return "请输入要搜索的关键词。"
             from app.db.repositories import get_vulnerabilities
             vulns = get_vulnerabilities(session, keyword=kw, limit=10)
             if not vulns:
@@ -161,24 +280,15 @@ def query_database(db, query_type, params=None):
                 "cvss": v.cvss_score, "score": v.action_value_score,
                 "is_kev": v.is_kev, "has_poc": v.has_poc_signal,
             } for v in vulns]
-        elif query_type == "search":
-            kw = params.get("keyword", "") if params else ""
-            vulns = session.exec(select(Vulnerability).where(
-                (Vulnerability.cve_id.contains(kw)) | (Vulnerability.title.contains(kw))
-            ).limit(10)).all()
-            if not vulns:
-                return f"未找到 '{kw}'"
-            lines = [f"搜索 '{kw}' ({len(vulns)} 条):"]
-            for v in vulns:
-                lines.append(f"{v.cve_id}  评分:{v.action_value_score:.0f}\n{v.title[:50]}")
-            return "\n---\n".join(lines)
         elif query_type == "cve":
             cve_id = params.get("cve_id", "") if params else ""
             vuln = session.exec(select(Vulnerability).where(Vulnerability.cve_id == cve_id)).first()
             if not vuln:
                 return f"未找到 {cve_id}"
-            return (f"{vuln.cve_id}\n{vuln.title}\n\n等级: {vuln.severity}  CVSS: {vuln.cvss_score or '-'}  EPSS: {vuln.epss_score or '-'}\n"
-                    f"KEV: {'是' if vuln.is_kev else '否'}  PoC: {'是' if vuln.has_poc_signal else '否'}  评分: {vuln.action_value_score:.0f}/100\n\n{vuln.description[:500]}")
+            return (f"{vuln.cve_id}\n{vuln.title}\n\n等级: {vuln.severity}  CVSS: {vuln.cvss_score or '-'}  "
+                    f"EPSS: {vuln.epss_score or '-'}\nKEV: {'是' if vuln.is_kev else '否'}  "
+                    f"PoC: {'是' if vuln.has_poc_signal else '否'}  评分: {vuln.action_value_score:.0f}/100\n\n"
+                    f"{vuln.description[:500]}")
         return "未知查询"
     except Exception as e:
         return f"错误: {e}"
@@ -186,26 +296,22 @@ def query_database(db, query_type, params=None):
         session.close()
 
 
-# ─── Stat Card Widget ─────────────────────────────────────────────
+# ─── Stat Card (dashboard) ──────────────────────────────────────────
 class StatCard(QFrame):
     def __init__(self, label, value, color, parent=None):
         super().__init__(parent)
         self.setFixedSize(140, 80)
         self.setCursor(Qt.PointingHandCursor)
-        self._color = color
-
         layout = QVBoxLayout(self)
         layout.setContentsMargins(14, 12, 14, 10)
         layout.setSpacing(4)
 
         val = QLabel(str(value))
-        val.setObjectName("statValue")
         val.setStyleSheet(f"color:{color}; font-size:26px; font-weight:800; font-family:Consolas;")
         layout.addWidget(val)
 
         lbl = QLabel(label)
-        lbl.setObjectName("statLabel")
-        lbl.setStyleSheet(f"color:{C['text2']}; font-size:12px; font-family:'Microsoft YaHei';")
+        lbl.setStyleSheet(f"color:{C['text2']}; font-size:12px;")
         layout.addWidget(lbl)
 
         self.setStyleSheet(f"""
@@ -221,18 +327,16 @@ class StatCard(QFrame):
         """)
 
         glow = QGraphicsDropShadowEffect()
-        glow.setBlurRadius(16)
+        glow.setBlurRadius(8)
         glow.setColor(QColor(color))
         glow.setOffset(0, 0)
-        # Only show subtle glow
-        glow.setBlurRadius(8)
         self.setGraphicsEffect(glow)
 
     def set_value(self, v):
-        self.findChild(QLabel, "statValue").setText(str(v))
+        self.findChild(QLabel).setText(str(v))
 
 
-# ─── Vuln Card Widget ─────────────────────────────────────────────
+# ─── Vuln Card (dashboard) ──────────────────────────────────────────
 class VulnCard(QFrame):
     clicked = Signal(dict)
 
@@ -246,13 +350,11 @@ class VulnCard(QFrame):
         layout.setContentsMargins(14, 8, 14, 8)
         layout.setSpacing(12)
 
-        # CVE ID
         cve = QLabel(data.get("cve_id", "N/A"))
         cve.setStyleSheet(f"color:{C['blue']}; font-size:13px; font-weight:bold; font-family:Consolas;")
         cve.setFixedWidth(140)
         layout.addWidget(cve)
 
-        # Tags
         tags_layout = QHBoxLayout()
         tags_layout.setSpacing(4)
         sev = data.get("severity", "").upper()
@@ -278,14 +380,12 @@ class VulnCard(QFrame):
         tags_layout.addStretch()
         layout.addLayout(tags_layout)
 
-        # CVSS
         cvss = data.get("cvss")
         cvss_lbl = QLabel(f"CVSS {cvss:.1f}" if cvss else "CVSS -")
         cvss_lbl.setStyleSheet(f"color:{C['text2']}; font-size:12px; font-family:Consolas;")
         cvss_lbl.setFixedWidth(80)
         layout.addWidget(cvss_lbl)
 
-        # Score
         score = data.get("score", 0) or 0
         if score >= 80:
             sc_color = C["red"]
@@ -301,9 +401,8 @@ class VulnCard(QFrame):
         sc_lbl.setAlignment(Qt.AlignCenter)
         layout.addWidget(sc_lbl)
 
-        # Title
         title = QLabel(data.get("title", ""))
-        title.setStyleSheet(f"color:{C['text2']}; font-size:12px; font-family:'Microsoft YaHei';")
+        title.setStyleSheet(f"color:{C['text2']}; font-size:12px;")
         title.setWordWrap(False)
         layout.addWidget(title, 1)
 
@@ -323,7 +422,7 @@ class VulnCard(QFrame):
         self.clicked.emit(self._data)
 
 
-# ─── Main Panel ───────────────────────────────────────────────────
+# ─── Main Agent Panel ───────────────────────────────────────────────
 class AgentPanel(QWidget):
 
     def __init__(self, config, db_session_factory, parent=None):
@@ -332,14 +431,11 @@ class AgentPanel(QWidget):
         self.db = db_session_factory
         self.setObjectName("agentPanel")
         self._worker = None
-        self._history = []
+        self._history: list[dict] = []
         self._current_vuln = None
-        self._stream_buf = ""
         self._streaming = False
-
-        self._animator = StreamAnimator()
-        self._animator.chunk_ready.connect(self._on_stream_chunk)
-        self._animator.finished.connect(self._on_stream_done)
+        self._current_stream: TypewriterRenderer | None = None
+        self._current_ai_msg: ChatMessageWidget | None = None
 
         self._build_ui()
         self._apply_style()
@@ -348,36 +444,26 @@ class AgentPanel(QWidget):
     def set_current_vuln(self, v):
         self._current_vuln = v
 
-    # ── Build UI ────────────────────────────────────────────────
+    # ── Build UI ────────────────────────────────────────────────────
     def _build_ui(self):
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
 
-        # ── Title Bar ───────────────────────────────────────────
-        title_bar = QFrame()
-        title_bar.setFixedHeight(48)
-        title_bar.setObjectName("titleBar")
-        tb = QHBoxLayout(title_bar)
-        tb.setContentsMargins(16, 0, 16, 0)
+        # ── Top Bar ────────────────────────────────────────────────
+        top = QFrame()
+        top.setObjectName("agentTopBar")
+        top.setFixedHeight(48)
+        tb = QHBoxLayout(top)
+        tb.setContentsMargins(24, 0, 16, 0)
 
-        dot = QLabel("●")
-        dot.setStyleSheet(f"color:{C['green']}; font-size:10px;")
-        tb.addWidget(dot)
-
-        r_icon = QLabel("R")
-        r_icon.setFixedSize(28, 28)
-        r_icon.setAlignment(Qt.AlignCenter)
-        r_icon.setStyleSheet(
-            f"color:{C['white']}; background:{C['green']}; "
-            f"border-radius:14px; font-size:12px; font-weight:bold; font-family:Consolas;"
-        )
-        tb.addWidget(r_icon)
-        tb.addSpacing(8)
-
-        name = QLabel("Rcon")
-        name.setStyleSheet(f"color:{C['text']}; font-size:15px; font-weight:600; font-family:'Microsoft YaHei';")
-        tb.addWidget(name)
+        title = QLabel("Rcon AI")
+        title.setObjectName("agentTitle")
+        tb.addWidget(title)
+        tb.addSpacing(10)
+        subtitle = QLabel("面向漏洞情报和风险优先级的安全助手")
+        subtitle.setObjectName("agentSubtitle")
+        tb.addWidget(subtitle)
         tb.addStretch()
 
         self.btn_new = QPushButton("+ 新对话")
@@ -386,14 +472,9 @@ class AgentPanel(QWidget):
         self.btn_new.clicked.connect(self._clear)
         tb.addWidget(self.btn_new)
 
-        for txt, clr in [("—", C["text3"]), ("□", C["text3"]), ("×", C["red"])]:
-            lbl = QLabel(txt)
-            lbl.setStyleSheet(f"color:{clr}; font-size:14px; padding:0 6px;")
-            tb.addWidget(lbl)
+        root.addWidget(top)
 
-        root.addWidget(title_bar)
-
-        # ── Content Area ────────────────────────────────────────
+        # ── Content Stack ──────────────────────────────────────────
         self.content_stack = QWidget()
         self.content_layout = QVBoxLayout(self.content_stack)
         self.content_layout.setContentsMargins(0, 0, 0, 0)
@@ -409,18 +490,18 @@ class AgentPanel(QWidget):
         self.chat_scroll.setFrameShape(QFrame.NoFrame)
         self.chat_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.chat_container = QWidget()
-        self.chat_container.setObjectName("chatContainer")
+        self.chat_container.setObjectName("chatPage")
         self.chat_layout = QVBoxLayout(self.chat_container)
-        self.chat_layout.setContentsMargins(0, 16, 0, 16)
-        self.chat_layout.setSpacing(0)
-        self.chat_layout.addStretch()
+        self.chat_layout.setContentsMargins(0, 24, 0, 24)
+        self.chat_layout.setSpacing(4)
+        self.chat_layout.addStretch(1)
         self.chat_scroll.setWidget(self.chat_container)
         self.chat_scroll.hide()
         self.content_layout.addWidget(self.chat_scroll)
 
         root.addWidget(self.content_stack, 1)
 
-        # ── Quick Actions ───────────────────────────────────────
+        # ── Quick Actions ──────────────────────────────────────────
         self.chip_frame = QFrame()
         self.chip_frame.setObjectName("chipFrame")
         chip_l = QHBoxLayout(self.chip_frame)
@@ -436,27 +517,17 @@ class AgentPanel(QWidget):
         chip_l.addStretch()
         root.addWidget(self.chip_frame)
 
-        # ── Input ───────────────────────────────────────────────
-        inp = QFrame()
-        inp.setObjectName("inputFrame")
-        il = QHBoxLayout(inp)
-        il.setContentsMargins(20, 12, 20, 20)
-        il.setSpacing(14)
+        # ── Composer ───────────────────────────────────────────────
+        composer_wrap = QFrame()
+        composer_wrap.setObjectName("composerWrap")
+        wrap_l = QVBoxLayout(composer_wrap)
+        wrap_l.setContentsMargins(120, 12, 120, 18)
 
-        self.input = QLineEdit()
-        self.input.setObjectName("chatInput")
-        self.input.setPlaceholderText("发送消息...")
-        self.input.returnPressed.connect(self._send)
-        il.addWidget(self.input, 1)
+        self.composer = ChatComposer()
+        self.composer.submitted.connect(self._send)
+        wrap_l.addWidget(self.composer)
 
-        self.btn_send = QPushButton("发送")
-        self.btn_send.setObjectName("sendBtn")
-        self.btn_send.setCursor(Qt.PointingHandCursor)
-        self.btn_send.setFixedSize(88, 48)
-        self.btn_send.clicked.connect(self._send)
-        il.addWidget(self.btn_send)
-
-        root.addWidget(inp)
+        root.addWidget(composer_wrap)
 
     def _build_dashboard(self):
         """Build the dashboard with stat cards and vuln list."""
@@ -466,12 +537,11 @@ class AgentPanel(QWidget):
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
 
         page = QWidget()
-        page.setStyleSheet(f"background:{C['bg']};")
         layout = QVBoxLayout(page)
         layout.setContentsMargins(32, 28, 32, 20)
         layout.setSpacing(24)
 
-        # ── Header ──────────────────────────────────────────────
+        # Header
         header = QHBoxLayout()
         header.setSpacing(12)
 
@@ -488,7 +558,7 @@ class AgentPanel(QWidget):
         info = QVBoxLayout()
         info.setSpacing(2)
         t = QLabel("Rcon")
-        t.setStyleSheet(f"color:{C['text']}; font-size:20px; font-weight:700; font-family:'Microsoft YaHei';")
+        t.setStyleSheet(f"color:{C['text']}; font-size:20px; font-weight:700;")
         info.addWidget(t)
         s = QLabel("漏洞情报侦察兵")
         s.setStyleSheet(f"color:{C['text2']}; font-size:13px;")
@@ -497,10 +567,9 @@ class AgentPanel(QWidget):
         header.addStretch()
         layout.addLayout(header)
 
-        # ── Stat Cards ──────────────────────────────────────────
+        # Stat Cards
         stats_label = QLabel("数据概览")
-        stats_label.setStyleSheet(f"color:{C['text2']}; font-size:13px; font-weight:600; "
-                                  f"font-family:'Microsoft YaHei'; margin-top:4px;")
+        stats_label.setStyleSheet(f"color:{C['text2']}; font-size:13px; font-weight:600; margin-top:4px;")
         layout.addWidget(stats_label)
 
         self.stats_grid = QHBoxLayout()
@@ -516,11 +585,10 @@ class AgentPanel(QWidget):
         self.stats_grid.addStretch()
         layout.addLayout(self.stats_grid)
 
-        # ── Vuln List ───────────────────────────────────────────
+        # Vuln List
         vuln_header = QHBoxLayout()
         vh_label = QLabel("最近漏洞")
-        vh_label.setStyleSheet(f"color:{C['text2']}; font-size:13px; font-weight:600; "
-                               f"font-family:'Microsoft YaHei';")
+        vh_label.setStyleSheet(f"color:{C['text2']}; font-size:13px; font-weight:600;")
         vuln_header.addWidget(vh_label)
         vuln_header.addStretch()
 
@@ -550,7 +618,6 @@ class AgentPanel(QWidget):
         self._load_dashboard()
 
     def _load_dashboard(self):
-        """Load stats and recent vulns into dashboard cards."""
         try:
             self._clear_vuln_list()
             stats = query_database(self.db, "stats")
@@ -578,246 +645,84 @@ class AgentPanel(QWidget):
         cve_id = data.get("cve_id", "")
         if cve_id:
             self._show_chat()
-            self._append_html(self._html_user(cve_id))
+            self._append_user(cve_id)
             result = query_database(self.db, "cve", {"cve_id": cve_id})
-            self._start_stream(result if isinstance(result, str) else str(result))
+            self._stream_assistant(result if isinstance(result, str) else str(result))
 
-    # ── Style ───────────────────────────────────────────────────
+    # ── Style ───────────────────────────────────────────────────────
     def _apply_style(self):
-        self.setStyleSheet(f"""
-            QWidget#agentPanel {{ background: {C['bg']}; }}
-            QFrame#titleBar {{
-                background: {C['bg2']};
-                border-bottom: 1px solid {C['border']};
-            }}
-            QPushButton#newBtn {{
-                background: {C['surface']};
-                color: {C['blue']};
-                border: 1px solid {C['border2']};
-                border-radius: 14px;
-                padding: 5px 16px;
-                font-size: 12px;
-                font-family: 'Microsoft YaHei';
-            }}
-            QPushButton#newBtn:hover {{
-                background: {C['surface2']};
-                border-color: {C['blue']};
-            }}
-            QPushButton#linkBtn {{
-                background: transparent;
-                color: {C['blue']};
-                border: none;
-                font-size: 12px;
-                font-family: 'Microsoft YaHei';
-            }}
-            QPushButton#linkBtn:hover {{ color: {C['white']}; }}
-            QFrame#chipFrame {{
-                background: {C['bg']};
-                border-top: 1px solid {C['border']};
-            }}
-            QPushButton#chipBtn {{
-                background: {C['surface']};
-                color: {C['text2']};
-                border: 1px solid {C['border']};
-                border-radius: 16px;
-                padding: 7px 16px;
-                font-size: 12px;
-                font-family: 'Microsoft YaHei';
-            }}
-            QPushButton#chipBtn:hover {{
-                background: {C['surface2']};
-                color: {C['text']};
-                border-color: {C['blue_dim']};
-            }}
-            QFrame#inputFrame {{
-                background: {C['bg']};
-                border-top: 1px solid {C['border']};
-            }}
-            QLineEdit#chatInput {{
-                background: {C['surface']};
-                color: {C['text']};
-                border: 2px solid {C['border']};
-                border-radius: 22px;
-                padding: 12px 20px;
-                font-size: 14px;
-                font-family: 'Microsoft YaHei';
-            }}
-            QLineEdit#chatInput:focus {{ border-color: {C['blue']}; }}
-            QLineEdit#chatInput::placeholder {{ color: {C['text3']}; }}
-            QPushButton#sendBtn {{
-                background: qlineargradient(x1:0,y1:0,x2:1,y2:0,
-                    stop:0 {C['blue2']}, stop:1 {C['blue']});
-                color: {C['white']};
-                border: none;
-                border-radius: 22px;
-                font-size: 14px;
-                font-weight: 600;
-                font-family: 'Microsoft YaHei';
-            }}
-            QPushButton#sendBtn:hover {{
-                background: qlineargradient(x1:0,y1:0,x2:1,y2:0,
-                    stop:0 {C['blue']}, stop:1 #4d9fff);
-            }}
-            QPushButton#sendBtn:disabled {{
-                background: {C['surface2']};
-                color: {C['text3']};
-            }}
-            QScrollArea {{ background: {C['bg']}; border: none; }}
-            QScrollBar:vertical {{
-                background: {C['bg']}; width: 5px; border: none;
-            }}
-            QScrollBar::handle:vertical {{
-                background: {C['border2']}; border-radius: 2px; min-height: 30px;
-            }}
-            QScrollBar::handle:vertical:hover {{ background: {C['text3']}; }}
-            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}
-        """)
+        self.setStyleSheet(AGENT_STYLE)
 
-    # ── Chat HTML ───────────────────────────────────────────────
-    def _html_user(self, text):
-        safe = self._esc(text)
-        return f'''
-        <div style="display:flex; justify-content:flex-end; margin:10px 48px 10px 80px;">
-          <div style="background:qlineargradient(x1:0,y1:0,x2:1,y2:0,stop:0 {C['blue2']},stop:1 {C['blue']});
-               color:#fff; padding:12px 18px; border-radius:18px 18px 4px 18px;
-               max-width:65%; font-size:14px; line-height:1.7; word-wrap:break-word;">
-            {safe}
-          </div>
-        </div>'''
-
-    def _html_ai(self, text, cursor=False):
-        safe = self._esc(text)
-        c = ' <span style="color:#3b82f6;">▌</span>' if cursor else ''
-        return f'''
-        <div style="display:flex; justify-content:flex-start; margin:10px 80px 10px 48px;">
-          <div style="width:30px; height:30px; background:qlineargradient(x1:0,y1:0,x2:1,y2:1,
-               stop:0 {C['blue2']},stop:1 {C['blue']}); border-radius:15px; flex-shrink:0;
-               display:flex; align-items:center; justify-content:center; margin-right:10px; margin-top:4px;">
-            <span style="color:white; font-size:12px; font-weight:bold; font-family:Consolas;">R</span>
-          </div>
-          <div style="background:{C['surface']}; color:{C['text']}; padding:12px 18px;
-               border-radius:18px 18px 18px 4px; max-width:70%; font-size:14px;
-               line-height:1.75; word-wrap:break-word; border:1px solid {C['border']};">
-            {safe}{c}
-          </div>
-        </div>'''
-
-    def _html_think(self, dots):
-        return f'''
-        <div style="display:flex; justify-content:flex-start; margin:10px 80px 10px 48px;">
-          <div style="width:30px; height:30px; background:{C['surface2']}; border-radius:15px;
-               flex-shrink:0; display:flex; align-items:center; justify-content:center;
-               margin-right:10px; margin-top:4px;">
-            <span style="color:{C['text3']}; font-size:12px; font-weight:bold; font-family:Consolas;">R</span>
-          </div>
-          <div style="background:{C['surface']}; color:{C['text3']}; padding:12px 18px;
-               border-radius:18px 18px 18px 4px; font-size:14px; line-height:1.75;
-               border:1px solid {C['border']}; display:flex; align-items:center; gap:6px;">
-            <span style="color:{C['blue']};">●</span> 正在思考 <span>{dots}</span>
-          </div>
-        </div>'''
-
-    def _esc(self, t):
-        return (t.replace("&", "&amp;").replace("<", "&lt;")
-                 .replace(">", "&gt;").replace("\n", "<br>")
-                 .replace("  ", "&nbsp;&nbsp;"))
-
-    # ── Chat Management ─────────────────────────────────────────
+    # ── Message Helpers ─────────────────────────────────────────────
     def _show_chat(self):
         self.dashboard.hide()
         self.chat_scroll.show()
 
-    def _append_html(self, html):
-        count = self.chat_layout.count()
-        idx = max(0, count - 1)
-        lbl = QLabel()
-        lbl.setTextFormat(Qt.RichText)
-        lbl.setTextInteractionFlags(Qt.TextSelectableByMouse | Qt.LinksAccessibleByMouse)
-        lbl.setWordWrap(True)
-        lbl.setText(html)
-        lbl.setStyleSheet("background:transparent;")
-        self.chat_layout.insertWidget(idx, lbl)
-        QTimer.singleShot(50, lambda: self.chat_scroll.verticalScrollBar().setValue(
-            self.chat_scroll.verticalScrollBar().maximum()))
+    def _append_user(self, text: str):
+        msg = ChatMessageWidget("user")
+        msg.set_text(text)
+        idx = max(0, self.chat_layout.count() - 1)
+        self.chat_layout.insertWidget(idx, msg)
+        QTimer.singleShot(0, lambda: animate_message_in(msg))
+        QTimer.singleShot(30, lambda: smooth_scroll_to_bottom(self.chat_scroll))
 
-    def _remove_last_widget(self):
-        count = self.chat_layout.count()
-        if count > 1:
-            item = self.chat_layout.takeAt(count - 2)
-            if item.widget():
-                item.widget().deleteLater()
+    def _append_assistant(self, text: str = "") -> ChatMessageWidget:
+        msg = ChatMessageWidget("assistant")
+        if text:
+            msg.set_text(text)
+        idx = max(0, self.chat_layout.count() - 1)
+        self.chat_layout.insertWidget(idx, msg)
+        QTimer.singleShot(0, lambda: animate_message_in(msg))
+        QTimer.singleShot(30, lambda: smooth_scroll_to_bottom(self.chat_scroll))
+        return msg
 
-    # ── Think Animation ─────────────────────────────────────────
-    def _start_think(self):
-        self._think_phase = 0
-        self._think_timer = QTimer()
-        self._think_timer.timeout.connect(self._tick_think)
-        self._think_timer.start(200)
-        self._append_html(self._html_think("..."))
-
-    def _tick_think(self):
-        self._think_phase += 1
-        dots = "." * (self._think_phase % 4)
-        self._remove_last_widget()
-        self._append_html(self._html_think(dots))
-
-    def _stop_think(self):
-        if hasattr(self, '_think_timer'):
-            self._think_timer.stop()
-
-    # ── Streaming ───────────────────────────────────────────────
-    def _start_stream(self, text):
-        self._stop_think()
+    # ── Streaming (single-widget update, no delete/recreate) ────────
+    def _stream_assistant(self, text: str):
         self._streaming = True
-        self._stream_buf = ""
-        self._append_html(self._html_ai("", cursor=True))
-        self._animator.start(text, speed_ms=8)
+        msg = self._append_assistant()
+        self._current_ai_msg = msg
+        renderer = TypewriterRenderer(msg, self)
+        self._current_stream = renderer
+        renderer.finished.connect(self._on_stream_finished)
+        renderer.start()
+        renderer.feed(text)
+        QTimer.singleShot(max(280, min(1800, len(text) * 4)), renderer.finish)
 
-    def _on_stream_chunk(self, chunk):
-        self._stream_buf += chunk
-        self._remove_last_widget()
-        self._append_html(self._html_ai(self._stream_buf, cursor=True))
-
-    def _on_stream_done(self):
+    def _on_stream_finished(self):
         self._streaming = False
-        self._remove_last_widget()
-        self._append_html(self._html_ai(self._stream_buf, cursor=False))
+        self._current_stream = None
 
-    # ── Actions ─────────────────────────────────────────────────
+    # ── Actions ─────────────────────────────────────────────────────
     def _on_chip(self, label):
         qtype = {"数据库概览": "stats", "最近漏洞": "recent", "高危 Top10": "top_risk"}.get(label)
         if not qtype:
             return
         self._show_chat()
-        self._append_html(self._html_user(f"[{label}]"))
+        self._append_user(f"[{label}]")
         result = query_database(self.db, qtype)
         if isinstance(result, (dict, list)):
-            import json
-            self._start_stream(json.dumps(result, ensure_ascii=False, indent=2))
+            self._stream_assistant(json.dumps(result, ensure_ascii=False, indent=2))
         else:
-            self._start_stream(str(result))
+            self._stream_assistant(str(result))
 
-    def _send(self):
-        msg = self.input.text().strip()
-        if not msg or self._streaming:
+    def _send(self, text: str):
+        if not text.strip() or self._streaming:
             return
         self._show_chat()
-        self._append_html(self._html_user(msg))
-        self.input.clear()
-        self._history.append({"role": "user", "content": msg})
+        self._append_user(text)
+        self._history.append({"role": "user", "content": text})
 
-        db_result = self._try_db(msg)
+        db_result = self._try_db(text)
         if db_result is not None:
             if isinstance(db_result, (dict, list)):
-                import json
-                self._start_stream(json.dumps(db_result, ensure_ascii=False, indent=2))
+                self._stream_assistant(json.dumps(db_result, ensure_ascii=False, indent=2))
             else:
-                self._start_stream(str(db_result))
+                self._stream_assistant(str(db_result))
             return
-        self._call_ai(msg)
+        self._call_ai(text)
 
     def _try_db(self, message):
-        m = re.search(r'(CVE[-\s]?)?(\d{4})[-\s]?(\d{4,})', message.upper(), re.I)
+        m = re.search(r"(CVE[-\s]?)?(\d{4})[-\s]?(\d{4,})", message.upper(), re.I)
         if m:
             return query_database(self.db, "cve", {"cve_id": f"CVE-{m.group(2)}-{m.group(3)}"})
         u = message.upper()
@@ -827,46 +732,49 @@ class AgentPanel(QWidget):
             return query_database(self.db, "recent")
         if any(k in u for k in ["高危", "严重", "TOP"]):
             return query_database(self.db, "top_risk")
-        sm = re.search(r'(搜索|查找|查询)\s+(.+)', message, re.I)
+        sm = re.search(r"(搜索|查找|查询)\s+(.+)", message, re.I)
         if sm:
             return query_database(self.db, "search", {"keyword": sm.group(2).strip()})
         return None
 
     def _call_ai(self, msg):
-        cfg = getattr(self.config, 'agent', None)
-        if not cfg or not getattr(cfg, 'api_key', ''):
-            self._start_stream("[!] 未配置 API Key，请在设置 → Agent 配置中设置")
+        cfg = getattr(self.config, "agent", None)
+        if not cfg or not getattr(cfg, "api_key", ""):
+            self._stream_assistant("[!] 未配置 API Key，请在设置 → Agent 配置中设置。")
             return
+
         db_ctx = query_database(self.db, "stats")
-        prompt = getattr(cfg, 'prompt', '你是网络安全专家')
+        prompt = getattr(cfg, "prompt", "你是网络安全专家")
         if isinstance(db_ctx, dict):
             prompt += f"\n\n数据库: 总{db_ctx['total']} KEV:{db_ctx['kev']} 未读:{db_ctx['unread']} 高危:{db_ctx['high']}"
 
-        self.btn_send.setEnabled(False)
-        self.btn_send.setText("...")
-        self._start_think()
+        self.composer.set_generating(True)
+        thinking = self._append_assistant("正在思考…")
 
         self._worker = AgentWorker(
-            getattr(cfg, 'protocol', '兼容 OpenAI'), cfg.api_key,
-            getattr(cfg, 'base_url', 'https://api.openai.com/v1'),
-            getattr(cfg, 'model', 'gpt-4o'), prompt,
-            self._history[-10:], getattr(cfg, 'max_tokens', 2000)
+            getattr(cfg, "protocol", "兼容 OpenAI"), cfg.api_key,
+            getattr(cfg, "base_url", "https://api.openai.com/v1"),
+            getattr(cfg, "model", "gpt-4o"), prompt,
+            self._history[-10:], getattr(cfg, "max_tokens", 2000),
         )
-        self._worker.response_ready.connect(self._on_ok)
-        self._worker.error_occurred.connect(self._on_err)
+        self._worker.response_ready.connect(
+            lambda text: self._on_ai_ok(thinking, text)
+        )
+        self._worker.error_occurred.connect(
+            lambda err: self._on_ai_err(thinking, err)
+        )
         self._worker.start()
 
-    def _on_ok(self, resp):
-        self._start_stream(resp)
+    def _on_ai_ok(self, thinking_widget: ChatMessageWidget, resp: str):
+        thinking_widget.deleteLater()
         self._history.append({"role": "assistant", "content": resp})
-        self.btn_send.setEnabled(True)
-        self.btn_send.setText("发送")
+        self._stream_assistant(resp)
+        self.composer.set_generating(False)
 
-    def _on_err(self, err):
-        self._stop_think()
-        self._start_stream(f"[!] {err}")
-        self.btn_send.setEnabled(True)
-        self.btn_send.setText("发送")
+    def _on_ai_err(self, thinking_widget: ChatMessageWidget, err: str):
+        thinking_widget.deleteLater()
+        self._stream_assistant(f"[!] {err}")
+        self.composer.set_generating(False)
 
     def _clear(self):
         while self.chat_layout.count() > 1:
@@ -875,7 +783,8 @@ class AgentPanel(QWidget):
                 item.widget().deleteLater()
         self._history.clear()
         self._streaming = False
-        self._stop_think()
+        self._current_stream = None
+        self._current_ai_msg = None
         self.chat_scroll.hide()
         self.dashboard.show()
         self._load_dashboard()
