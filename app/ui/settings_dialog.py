@@ -178,37 +178,34 @@ class SettingsDialog(QDialog):
         layout.setContentsMargins(6, 6, 6, 6)
         layout.setSpacing(14)
 
-        # ── 数据同步 ──
-        g1 = QGroupBox("数据同步")
-        l1 = QVBoxLayout()
-        l1.setSpacing(10)
-        self.refresh_interval = NoScrollSpinBox()
-        self.refresh_interval.setRange(5, 1440)
-        self.refresh_interval.setValue(prefs.get("refresh_interval_minutes", 15))
-        self.refresh_interval.setSuffix(" 分钟")
-        self.refresh_interval.setFixedHeight(34)
-        l1.addLayout(_form_row("同步间隔:", self.refresh_interval))
-        g1.setLayout(l1)
-        layout.addWidget(g1)
-
         # ── 联网行为 ──
         g_net = QGroupBox("联网行为")
         l_net = QVBoxLayout()
         l_net.setSpacing(10)
         self.chk_auto_update_startup = GlowCheckBox("启动时自动联网更新数据库")
         self.chk_auto_update_startup.setToolTip("打开程序后自动从互联网拉取最新漏洞情报")
-        self.chk_auto_update_startup.setChecked(getattr(self.config.app, "auto_update_on_startup", False))
+        self.chk_auto_update_startup.setChecked(True)
         l_net.addWidget(self.chk_auto_update_startup)
-        self.chk_auto_update_enabled = GlowCheckBox("启用后台定时联网更新")
-        self.chk_auto_update_enabled.setToolTip("按设置的刷新间隔定时更新本地数据库")
-        self.chk_auto_update_enabled.setChecked(getattr(self.config.app, "auto_update_enabled", False))
+        self.chk_auto_update_enabled = GlowCheckBox("允许后台定时更新数据库")
+        self.chk_auto_update_enabled.setToolTip("按设定的间隔定时更新本地数据库")
+        self.chk_auto_update_enabled.setChecked(True)
+        self.chk_auto_update_enabled.stateChanged.connect(self._on_auto_update_toggle)
         l_net.addWidget(self.chk_auto_update_enabled)
-        self.chk_update_ai_push_startup = GlowCheckBox("启动后 AI 推送前先联网更新")
-        self.chk_update_ai_push_startup.setToolTip("启动后生成 AI 推送前，先执行一次数据库更新")
-        self.chk_update_ai_push_startup.setChecked(getattr(self.config.app, "update_on_ai_push_startup", False))
-        l_net.addWidget(self.chk_update_ai_push_startup)
         g_net.setLayout(l_net)
         layout.addWidget(g_net)
+
+        # ── 数据更新 ──
+        g1 = QGroupBox("数据更新")
+        l1 = QVBoxLayout()
+        l1.setSpacing(10)
+        self.refresh_interval = NoScrollSpinBox()
+        self.refresh_interval.setRange(10, 1440)
+        self.refresh_interval.setValue(prefs.get("refresh_interval_minutes", 15))
+        self.refresh_interval.setSuffix(" min")
+        self.refresh_interval.setFixedHeight(34)
+        l1.addLayout(_form_row("更新间隔:", self.refresh_interval))
+        g1.setLayout(l1)
+        layout.addWidget(g1)
 
         # ── 网络代理 ──
         g2 = QGroupBox("网络代理")
@@ -216,19 +213,25 @@ class SettingsDialog(QDialog):
         l2.setSpacing(10)
         self.proxy_enabled = GlowCheckBox("启用代理")
         self.proxy_enabled.setChecked(self.config.proxy.enabled)
+        self.proxy_enabled.stateChanged.connect(self._on_proxy_toggle)
         l2.addWidget(self.proxy_enabled)
         self.http_proxy = QLineEdit()
         self.http_proxy.setText(self.config.proxy.http_proxy)
         self.http_proxy.setPlaceholderText("http://127.0.0.1:7890")
         self.http_proxy.setFixedHeight(34)
+        self.http_proxy.setEnabled(self.config.proxy.enabled)
         l2.addLayout(_form_row("HTTP 代理:", self.http_proxy))
         self.https_proxy = QLineEdit()
         self.https_proxy.setText(self.config.proxy.https_proxy)
         self.https_proxy.setPlaceholderText("http://127.0.0.1:7890 或 socks5://127.0.0.1:7890")
         self.https_proxy.setFixedHeight(34)
+        self.https_proxy.setEnabled(self.config.proxy.enabled)
         l2.addLayout(_form_row("HTTPS 代理:", self.https_proxy))
         g2.setLayout(l2)
         layout.addWidget(g2)
+
+        # Set initial enabled state for sync interval
+        self._on_auto_update_toggle()
 
         # ── 提醒设置 ──
         g3 = QGroupBox("提醒设置")
@@ -305,6 +308,7 @@ class SettingsDialog(QDialog):
         vbox.setSpacing(10)
         self.nvd_enabled = GlowCheckBox("启用")
         self.nvd_enabled.setChecked(self.config.nvd.enabled)
+        self.nvd_enabled.stateChanged.connect(self._on_nvd_toggle)
         vbox.addWidget(self.nvd_enabled)
         self.nvd_api_key = QLineEdit()
         self.nvd_api_key.setText(self.config.nvd.api_key)
@@ -357,6 +361,7 @@ class SettingsDialog(QDialog):
         vbox.setSpacing(10)
         self.gh_enabled = GlowCheckBox("启用")
         self.gh_enabled.setChecked(self.config.github_advisory.enabled)
+        self.gh_enabled.stateChanged.connect(self._on_gh_toggle)
         vbox.addWidget(self.gh_enabled)
         self.gh_token = QLineEdit()
         self.gh_token.setText(self.config.github_advisory.token)
@@ -385,6 +390,8 @@ class SettingsDialog(QDialog):
         g.setLayout(vbox)
         layout.addWidget(g)
 
+        self._on_nvd_toggle()
+        self._on_gh_toggle()
         layout.addStretch()
         scroll.setWidget(inner)
 
@@ -529,6 +536,7 @@ class SettingsDialog(QDialog):
 
         self.agent_enabled = GlowCheckBox("启用 AI Agent")
         self.agent_enabled.setChecked(getattr(agent_cfg, 'enabled', False) if agent_cfg else False)
+        self.agent_enabled.stateChanged.connect(self._on_agent_toggle)
         l2.addWidget(self.agent_enabled)
 
         self.agent_auto_analysis = GlowCheckBox("打开详情时自动分析")
@@ -572,6 +580,7 @@ class SettingsDialog(QDialog):
         g4.setLayout(l4)
         layout.addWidget(g4)
 
+        self._on_agent_toggle()
         layout.addStretch()
         scroll.setWidget(inner)
 
@@ -679,12 +688,49 @@ class SettingsDialog(QDialog):
             self.btn_test_conn.setEnabled(True)
             self.btn_test_conn.setText("🔗 测试连接")
 
+    def _on_auto_update_toggle(self):
+        """Enable/disable sync interval based on auto_update_enabled."""
+        enabled = self.chk_auto_update_enabled.isChecked()
+        self.refresh_interval.setEnabled(enabled)
+
+    def _on_proxy_toggle(self):
+        """Enable/disable proxy inputs based on proxy_enabled."""
+        enabled = self.proxy_enabled.isChecked()
+        self.http_proxy.setEnabled(enabled)
+        self.https_proxy.setEnabled(enabled)
+
+    def _on_nvd_toggle(self):
+        """Enable/disable NVD inputs based on enabled state."""
+        enabled = self.nvd_enabled.isChecked()
+        self.nvd_api_key.setEnabled(enabled)
+        self.nvd_rate.setEnabled(enabled)
+        self.nvd_days.setEnabled(enabled)
+        self.nvd_max.setEnabled(enabled)
+
+    def _on_gh_toggle(self):
+        """Enable/disable GitHub token based on enabled state."""
+        enabled = self.gh_enabled.isChecked()
+        self.gh_token.setEnabled(enabled)
+
+    def _on_agent_toggle(self):
+        """Enable/disable agent config inputs based on agent_enabled."""
+        enabled = self.agent_enabled.isChecked()
+        self.agent_protocol.setEnabled(enabled)
+        self.agent_base_url.setEnabled(enabled)
+        self.agent_api_key.setEnabled(enabled)
+        self.agent_model.setEnabled(enabled)
+        self.agent_max_tokens.setEnabled(enabled)
+        self.agent_prompt.setEnabled(enabled)
+        self.btn_test_conn.setEnabled(enabled)
+        self.agent_auto_analysis.setEnabled(enabled)
+        self.agent_db_access.setEnabled(enabled)
+
     def _on_save(self):
         self._result = {
             "refresh_interval_minutes": self.refresh_interval.value(),
             "auto_update_on_startup": self.chk_auto_update_startup.isChecked(),
             "auto_update_enabled": self.chk_auto_update_enabled.isChecked(),
-            "update_on_ai_push_startup": self.chk_update_ai_push_startup.isChecked(),
+            "update_on_ai_push_startup": True,  # Always on, binding behavior
             "min_score_to_badge": self.min_badge.value(),
             "min_score_to_notify": self.min_notify.value(),
             "quiet_hours_enabled": self.quiet_enabled.isChecked(),

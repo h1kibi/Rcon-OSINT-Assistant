@@ -9,9 +9,9 @@ class AppConfig(BaseModel):
     refresh_interval_minutes: int = 60
     database_url: str = "sqlite:///data/rcon.db"
     start_minimized: bool = False
-    auto_update_on_startup: bool = False
-    auto_update_enabled: bool = False
-    update_on_ai_push_startup: bool = False
+    auto_update_on_startup: bool = True
+    auto_update_enabled: bool = True
+    update_on_ai_push_startup: bool = True
 
 
 class ProxyConfig(BaseModel):
