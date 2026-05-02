@@ -13,6 +13,9 @@ from loguru import logger
 
 from app.ui.chat_widgets import ChatMessageWidget, ChatComposer, render_markdown
 from app.ui.chat_animations import animate_message_in, smooth_scroll_to_bottom, TypewriterRenderer
+from app.services.agent_tools import AgentToolService
+from app.services.agent_service import AgentService
+from app.services.agent_worker import AgentWorker
 
 
 # ─── Colors (scoped to agent panel) ──────────────────────────────────
@@ -183,119 +186,6 @@ QWidget#agentPanel QScrollBar::add-line:vertical, QWidget#agentPanel QScrollBar:
 """
 
 
-# ─── Agent Worker (will be extracted in Commit 2) ───────────────────
-class AgentWorker(QThread):
-    response_ready = Signal(str)
-    error_occurred = Signal(str)
-
-    def __init__(self, protocol, api_key, base_url, model, system_prompt, messages, max_tokens=2000):
-        super().__init__()
-        self.protocol = protocol
-        self.api_key = api_key
-        self.base_url = base_url.rstrip("/")
-        self.model = model
-        self.system_prompt = system_prompt
-        self.messages = messages
-        self.max_tokens = max_tokens
-
-    def run(self):
-        try:
-            import httpx
-            if "Anthropic" in self.protocol:
-                self._call_anthropic()
-            else:
-                self._call_openai()
-        except Exception as e:
-            self.error_occurred.emit(str(e))
-
-    def _call_openai(self):
-        import httpx
-        headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
-        all_msgs = [{"role": "system", "content": self.system_prompt}] + self.messages
-        data = {"model": self.model, "messages": all_msgs, "max_tokens": self.max_tokens, "temperature": 0.7}
-        resp = httpx.post(f"{self.base_url}/chat/completions", headers=headers, json=data, timeout=120.0)
-        if resp.status_code != 200:
-            try:
-                detail = resp.json().get("error", {}).get("message", resp.text[:200])
-            except Exception:
-                detail = resp.text[:200]
-            raise Exception(f"API {resp.status_code}: {detail}")
-        result = resp.json()
-        if "choices" not in result:
-            raise Exception(f"响应格式异常: {str(result)[:200]}")
-        self.response_ready.emit(result["choices"][0]["message"]["content"])
-
-    def _call_anthropic(self):
-        import httpx
-        headers = {"x-api-key": self.api_key, "anthropic-version": "2023-06-01", "Content-Type": "application/json"}
-        data = {"model": self.model, "max_tokens": self.max_tokens, "system": self.system_prompt, "messages": self.messages}
-        resp = httpx.post(f"{self.base_url}/messages", headers=headers, json=data, timeout=120.0)
-        if resp.status_code != 200:
-            try:
-                detail = resp.json().get("error", {}).get("message", resp.text[:200])
-            except Exception:
-                detail = resp.text[:200]
-            raise Exception(f"API {resp.status_code}: {detail}")
-        self.response_ready.emit(resp.json()["content"][0]["text"])
-
-
-# ─── Database Query (will be extracted in Commit 2) ─────────────────
-def query_database(db, query_type, params=None):
-    from app.db.models import Vulnerability
-    from sqlmodel import select, func
-    session = db()
-    try:
-        if query_type == "stats":
-            t = session.exec(select(func.count(Vulnerability.id))).one()
-            k = session.exec(select(func.count(Vulnerability.id)).where(Vulnerability.is_kev == True)).one()
-            u = session.exec(select(func.count(Vulnerability.id)).where(Vulnerability.status == "unread")).one()
-            h = session.exec(select(func.count(Vulnerability.id)).where(Vulnerability.action_value_score >= 80)).one()
-            return {"total": t, "kev": k, "unread": u, "high": h}
-        elif query_type == "recent":
-            from app.db.repositories import get_vulnerabilities
-            vulns = get_vulnerabilities(session, sort="date_desc", limit=8)
-            return [{
-                "cve_id": v.cve_id or v.ghsa_id, "title": v.title[:60], "severity": v.severity,
-                "cvss": v.cvss_score, "score": v.action_value_score,
-                "is_kev": v.is_kev, "has_poc": v.has_poc_signal,
-            } for v in vulns]
-        elif query_type == "search":
-            kw = (params.get("keyword", "") if params else "").strip()
-            if not kw:
-                return "请输入要搜索的关键词。"
-            from app.db.repositories import get_vulnerabilities
-            vulns = get_vulnerabilities(session, keyword=kw, limit=10)
-            if not vulns:
-                return f"未找到 '{kw}' 相关漏洞"
-            lines = [f"搜索 '{kw}' ({len(vulns)} 条):"]
-            for v in vulns:
-                cid = v.cve_id or v.ghsa_id or v.osv_id or "N/A"
-                lines.append(f"{cid}  评分:{v.action_value_score:.0f}\n{v.title[:50]}")
-            return "\n---\n".join(lines)
-        elif query_type == "top_risk":
-            from app.db.repositories import get_vulnerabilities
-            vulns = get_vulnerabilities(session, sort="score_desc", limit=8)
-            return [{
-                "cve_id": v.cve_id or v.ghsa_id, "title": v.title[:60], "severity": v.severity,
-                "cvss": v.cvss_score, "score": v.action_value_score,
-                "is_kev": v.is_kev, "has_poc": v.has_poc_signal,
-            } for v in vulns]
-        elif query_type == "cve":
-            cve_id = params.get("cve_id", "") if params else ""
-            vuln = session.exec(select(Vulnerability).where(Vulnerability.cve_id == cve_id)).first()
-            if not vuln:
-                return f"未找到 {cve_id}"
-            return (f"{vuln.cve_id}\n{vuln.title}\n\n等级: {vuln.severity}  CVSS: {vuln.cvss_score or '-'}  "
-                    f"EPSS: {vuln.epss_score or '-'}\nKEV: {'是' if vuln.is_kev else '否'}  "
-                    f"PoC: {'是' if vuln.has_poc_signal else '否'}  评分: {vuln.action_value_score:.0f}/100\n\n"
-                    f"{vuln.description[:500]}")
-        return "未知查询"
-    except Exception as e:
-        return f"错误: {e}"
-    finally:
-        session.close()
-
-
 # ─── Stat Card (dashboard) ──────────────────────────────────────────
 class StatCard(QFrame):
     def __init__(self, label, value, color, parent=None):
@@ -436,6 +326,9 @@ class AgentPanel(QWidget):
         self._streaming = False
         self._current_stream: TypewriterRenderer | None = None
         self._current_ai_msg: ChatMessageWidget | None = None
+
+        self.tools = AgentToolService(db_session_factory)
+        self.agent_service = AgentService(lambda: self.config, self.tools)
 
         self._build_ui()
         self._apply_style()
@@ -620,21 +513,19 @@ class AgentPanel(QWidget):
     def _load_dashboard(self):
         try:
             self._clear_vuln_list()
-            stats = query_database(self.db, "stats")
-            if isinstance(stats, dict):
-                self.card_total.set_value(stats["total"])
-                self.card_kev.set_value(stats["kev"])
-                self.card_unread.set_value(stats["unread"])
-                self.card_high.set_value(stats["high"])
+            stats = self.tools.stats()
+            self.card_total.set_value(stats["total"])
+            self.card_kev.set_value(stats["kev"])
+            self.card_unread.set_value(stats["unread"])
+            self.card_high.set_value(stats["high"])
 
-            vulns = query_database(self.db, "recent")
-            if isinstance(vulns, list):
-                if not vulns:
-                    empty = QLabel("暂无漏洞数据，等待同步完成后自动刷新")
-                    empty.setStyleSheet("color:#3d4450; font-size:13px; padding:16px;")
-                    self.vuln_list.addWidget(empty)
-                else:
-                    for v in vulns:
+            vulns = self.tools.recent()
+            if not vulns:
+                empty = QLabel("暂无漏洞数据，等待同步完成后自动刷新")
+                empty.setStyleSheet("color:#3d4450; font-size:13px; padding:16px;")
+                self.vuln_list.addWidget(empty)
+            else:
+                for v in vulns:
                         card = VulnCard(v)
                         card.clicked.connect(lambda d=v: self._on_vuln_click(d))
                         self.vuln_list.addWidget(card)
@@ -646,10 +537,14 @@ class AgentPanel(QWidget):
         if cve_id:
             self._show_chat()
             self._append_user(cve_id)
-            result = query_database(self.db, "cve", {"cve_id": cve_id})
-            self._stream_assistant(result if isinstance(result, str) else str(result))
+            result = self.tools.cve(cve_id)
+            self._stream_assistant(str(result) if result else f"未找到 {cve_id}")
 
     # ── Style ───────────────────────────────────────────────────────
+    def update_config(self, config):
+        self.config = config
+        self.agent_service = AgentService(lambda: self.config, self.tools)
+
     def _apply_style(self):
         self.setStyleSheet(AGENT_STYLE)
 
@@ -694,12 +589,18 @@ class AgentPanel(QWidget):
 
     # ── Actions ─────────────────────────────────────────────────────
     def _on_chip(self, label):
-        qtype = {"数据库概览": "stats", "最近漏洞": "recent", "高危 Top10": "top_risk"}.get(label)
+        mapping = {"数据库概览": "stats", "最近漏洞": "recent", "高危 Top10": "top_risk"}
+        qtype = mapping.get(label)
         if not qtype:
             return
         self._show_chat()
         self._append_user(f"[{label}]")
-        result = query_database(self.db, qtype)
+        if qtype == "stats":
+            result = self.tools.stats()
+        elif qtype == "recent":
+            result = self.tools.recent()
+        else:
+            result = self.tools.top_risk()
         if isinstance(result, (dict, list)):
             self._stream_assistant(json.dumps(result, ensure_ascii=False, indent=2))
         else:
@@ -722,19 +623,39 @@ class AgentPanel(QWidget):
         self._call_ai(text)
 
     def _try_db(self, message):
-        m = re.search(r"(CVE[-\s]?)?(\d{4})[-\s]?(\d{4,})", message.upper(), re.I)
-        if m:
-            return query_database(self.db, "cve", {"cve_id": f"CVE-{m.group(2)}-{m.group(3)}"})
-        u = message.upper()
-        if any(k in u for k in ["统计", "概览", "总数", "数据库"]):
-            return query_database(self.db, "stats")
-        if any(k in u for k in ["最近", "最新"]):
-            return query_database(self.db, "recent")
-        if any(k in u for k in ["高危", "严重", "TOP"]):
-            return query_database(self.db, "top_risk")
-        sm = re.search(r"(搜索|查找|查询)\s+(.+)", message, re.I)
-        if sm:
-            return query_database(self.db, "search", {"keyword": sm.group(2).strip()})
+        normalized = message.strip()
+        if not normalized:
+            return None
+
+        # CVE query — always highest priority, any position
+        cve_match = re.search(r"\bCVE[-\s]?(\d{4})[-\s]?(\d{4,})\b", normalized, re.I)
+        if cve_match:
+            cve_id = f"CVE-{cve_match.group(1)}-{cve_match.group(2)}"
+            result = self.tools.cve(cve_id)
+            return result if result else f"未在本地数据库中找到 {cve_id}。"
+
+        first_sentence = re.split(r"[。！？\n]", normalized, maxsplit=1)[0]
+        short_query = len(normalized) <= 24
+        no_context = len(self._history) <= 1
+
+        def starts_with_any(words):
+            return any(first_sentence.startswith(w) for w in words)
+
+        allow_tool = short_query or no_context
+
+        if allow_tool and starts_with_any(["统计", "概览", "数据库概览", "当前统计"]):
+            return self.tools.stats()
+
+        if allow_tool and starts_with_any(["最近", "最新", "新漏洞", "最近漏洞"]):
+            return self.tools.recent()
+
+        if allow_tool and starts_with_any(["高危", "严重", "Top", "TOP", "优先处置"]):
+            return self.tools.top_risk()
+
+        search_match = re.match(r"^(搜索|查找|查询)\s+(.+)$", normalized, re.I)
+        if search_match and len(search_match.group(2).strip()) >= 2:
+            return self.tools.search(search_match.group(2).strip())
+
         return None
 
     def _call_ai(self, msg):
@@ -743,20 +664,10 @@ class AgentPanel(QWidget):
             self._stream_assistant("[!] 未配置 API Key，请在设置 → Agent 配置中设置。")
             return
 
-        db_ctx = query_database(self.db, "stats")
-        prompt = getattr(cfg, "prompt", "你是网络安全专家")
-        if isinstance(db_ctx, dict):
-            prompt += f"\n\n数据库: 总{db_ctx['total']} KEV:{db_ctx['kev']} 未读:{db_ctx['unread']} 高危:{db_ctx['high']}"
-
         self.composer.set_generating(True)
         thinking = self._append_assistant("正在思考…")
 
-        self._worker = AgentWorker(
-            getattr(cfg, "protocol", "兼容 OpenAI"), cfg.api_key,
-            getattr(cfg, "base_url", "https://api.openai.com/v1"),
-            getattr(cfg, "model", "gpt-4o"), prompt,
-            self._history[-10:], getattr(cfg, "max_tokens", 2000),
-        )
+        self._worker = AgentWorker(self.agent_service, self._history[-10:])
         self._worker.response_ready.connect(
             lambda text: self._on_ai_ok(thinking, text)
         )

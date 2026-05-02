@@ -580,6 +580,8 @@ class MainWindow(QMainWindow):
         config_path = Path("config.toml")
         if config_path.exists():
             self.config = load_config(config_path)
+            if hasattr(self, "agent_panel"):
+                self.agent_panel.update_config(self.config)
             self.config_changed.emit(self.config)
             logger.info("Config reloaded from disk")
 
