@@ -133,7 +133,6 @@ def query_database(db, query_type, params=None):
             h = session.exec(select(func.count(Vulnerability.id)).where(Vulnerability.action_value_score >= 80)).one()
             return {"total": t, "kev": k, "unread": u, "high": h}
         elif query_type == "recent":
-            from sqlalchemy import func as sa_func
             from app.db.repositories import get_vulnerabilities
             vulns = get_vulnerabilities(session, sort="date_desc", limit=8)
             return [{
@@ -142,7 +141,9 @@ def query_database(db, query_type, params=None):
                 "is_kev": v.is_kev, "has_poc": v.has_poc_signal,
             } for v in vulns]
         elif query_type == "search":
-            kw = params.get("keyword", "") if params else ""
+            kw = (params.get("keyword", "") if params else "").strip()
+            if not kw:
+                return "请输入要搜索的关键词，例如 CVE、组件名、厂商或漏洞标题。"
             from app.db.repositories import get_vulnerabilities
             vulns = get_vulnerabilities(session, keyword=kw, limit=10)
             if not vulns:
