@@ -49,7 +49,7 @@ def run_migrations(session: Session):
         _create_sort_indexes(session)
         _mark_applied(session, 2)
 
-    logger.info(f"Schema at version(s): {sorted(applied)}")
+    logger.info(f"Schema at version(s): {sorted(_get_applied_versions(session))}")
 
 
 def _migrate_v1(session: Session):
@@ -176,9 +176,6 @@ def _run_schema_migrations(session: Session):
 
     session.commit()
     logger.info("Schema migrations completed")
-
-    # Composite indexes for sort performance
-    _create_sort_indexes(session)
 
 
 def _create_sort_indexes(session: Session):
