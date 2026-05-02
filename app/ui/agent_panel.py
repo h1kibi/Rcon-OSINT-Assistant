@@ -509,8 +509,9 @@ class AgentPanel(QWidget):
             if not sessions:
                 first = repo.create_agent_session(db)
                 sessions = [first]
-            self._sessions = sessions
-            self._current_session_id = sessions[0].id
+            # Copy fields before session closes
+            self._sessions = [{"id": s.id, "title": s.title, "status": s.status} for s in sessions]
+            self._current_session_id = self._sessions[0]["id"]
             repo.touch_agent_session(db, self._current_session_id)
         finally:
             db.close()
@@ -520,7 +521,8 @@ class AgentPanel(QWidget):
     def _refresh_sessions(self):
         db = self.db()
         try:
-            self._sessions = repo.list_agent_sessions(db, limit=30)
+            sessions = repo.list_agent_sessions(db, limit=30)
+            self._sessions = [{"id": s.id, "title": s.title, "status": s.status} for s in sessions]
         finally:
             db.close()
 
@@ -532,7 +534,7 @@ class AgentPanel(QWidget):
             s = repo.create_agent_session(db)
         finally:
             db.close()
-        self._sessions.append(s)
+        self._sessions.append({"id": s.id, "title": s.title, "status": s.status})
         self._switch_session(s.id)
 
     def _switch_session(self, session_id: int):
@@ -560,19 +562,19 @@ class AgentPanel(QWidget):
             if widget:
                 widget.deleteLater()
         for s in self._sessions:
-            tab = SessionTab(s.id, s.title)
-            tab.setChecked(s.id == self._current_session_id)
-            tab.clicked.connect(lambda _, sid=s.id: self._switch_session(sid))
+            tab = SessionTab(s["id"], s["title"])
+            tab.setChecked(s["id"] == self._current_session_id)
+            tab.clicked.connect(lambda _, sid=s["id"]: self._switch_session(sid))
             tab.rename_requested.connect(self._rename_session_dialog)
             tab.delete_requested.connect(self._delete_session)
             self.session_tabs_layout.addWidget(tab)
         self.session_tabs_layout.addStretch(1)
 
     def _rename_session_dialog(self, session_id: int):
-        s = next((x for x in self._sessions if x.id == session_id), None)
+        s = next((x for x in self._sessions if x["id"] == session_id), None)
         if not s:
             return
-        title, ok = QInputDialog.getText(self, "RENAME_SESSION", "New session title:", text=s.title)
+        title, ok = QInputDialog.getText(self, "RENAME_SESSION", "New session title:", text=s["title"])
         if not ok:
             return
         title = title.strip()
@@ -590,10 +592,10 @@ class AgentPanel(QWidget):
         if len(self._sessions) <= 1:
             QMessageBox.information(self, "DELETE_SESSION", "至少保留一个会话。")
             return
-        s = next((x for x in self._sessions if x.id == session_id), None)
+        s = next((x for x in self._sessions if x["id"] == session_id), None)
         ret = QMessageBox.question(
             self, "DELETE_SESSION",
-            f"Delete session [{s.title if s else 'SESSION'}]?",
+            f"Delete session [{s['title'] if s else 'SESSION'}]?",
             QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
         )
         if ret != QMessageBox.Yes:
@@ -607,7 +609,7 @@ class AgentPanel(QWidget):
         self._refresh_sessions()
         if was_current:
             if self._sessions:
-                self._switch_session(self._sessions[0].id)
+                self._switch_session(self._sessions[0]["id"])
             else:
                 self._new_session()
         else:
@@ -647,15 +649,15 @@ class AgentPanel(QWidget):
         QTimer.singleShot(20, lambda: smooth_scroll_to_bottom(self.chat_scroll, duration=80))
 
     def _maybe_auto_title(self, text: str):
-        s = next((x for x in self._sessions if x.id == self._current_session_id), None)
-        if not s or not s.title.startswith("SESSION_"):
+        s = next((x for x in self._sessions if x["id"] == self._current_session_id), None)
+        if not s or not s["title"].startswith("SESSION_"):
             return
         title = " ".join(text.split())
         title = title.replace("\n", " ")
         title = title[:24] + "..." if len(title) > 24 else title
         db = self.db()
         try:
-            repo.rename_agent_session(db, s.id, title)
+            repo.rename_agent_session(db, s["id"], title)
         finally:
             db.close()
         self._refresh_sessions()
