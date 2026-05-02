@@ -251,6 +251,8 @@ def search_fts(session: Session, query: str, limit: int = 100) -> list[int]:
 def save_affected_products(
     session: Session, vuln_id: int, products: list[dict]
 ):
+    if not products:
+        products = []
     existing = session.exec(
         select(AffectedProduct).where(
             AffectedProduct.vulnerability_id == vuln_id
@@ -300,6 +302,8 @@ def get_affected_products(session: Session, vuln_id: int) -> list[AffectedProduc
 # ─── References Repository ──────────────────────────────────────────
 
 def save_references(session: Session, vuln_id: int, refs: list[dict]):
+    if not refs:
+        refs = []
     existing = session.exec(
         select(VulnerabilityReference).where(
             VulnerabilityReference.vulnerability_id == vuln_id
