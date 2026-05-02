@@ -36,6 +36,7 @@ from app.ui.main_window import MainWindow
 class SyncSignals(QObject):
     """Signals for cross-thread communication."""
     sync_done = Signal()
+    sync_failed = Signal(str)
 
 
 def _seed_mock_data(session):
@@ -439,14 +440,18 @@ def main():
             sync_pending[0] = True
             logger.info("Sync already running; marked one pending")
             return
+        failed = False
         try:
             try:
                 _run_sync(get_settings(), get_collectors(), get_epss(), get_scorer())
             except Exception as e:
+                failed = True
                 logger.exception(f"Sync failed: {type(e).__name__}")
+                sync_signals.sync_failed.emit(str(e))
         finally:
             sync_lock.release()
-            sync_signals.sync_done.emit()
+            if not failed:
+                sync_signals.sync_done.emit()
 
     def _after_sync_done():
         """Unified post-sync handler: UI refresh, pending config, coalesced sync."""
@@ -467,6 +472,7 @@ def main():
             QTimer.singleShot(500, sync_func)
 
     sync_signals.sync_done.connect(_after_sync_done)
+    sync_signals.sync_failed.connect(lambda err: main_window.status_label.setText(f"同步失败: {err}"))
 
     def sync_func():
         def _worker():

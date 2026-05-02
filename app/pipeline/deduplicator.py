@@ -1,6 +1,15 @@
 from collections import defaultdict
+from datetime import datetime, timezone
 from app.collectors.base import NormalizedVulnerability
-from app.utils.time import _ensure_aware
+
+
+def _to_utc(dt: datetime | None) -> datetime | None:
+    """Defensive normalization for mixed timezone-aware/naive datetimes."""
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
 
 
 def deduplicate(vulns: list[NormalizedVulnerability]) -> list[NormalizedVulnerability]:
@@ -58,11 +67,11 @@ def _merge_group(key: str, items: list[NormalizedVulnerability]) -> NormalizedVu
             merged_cpes.add(cpe)
 
     # Compute earliest published_at across all sources
-    published_candidates = [
-        (_ensure_aware(v.published_at), v.source)
-        for v in items
-        if v.published_at is not None
-    ]
+        published_candidates = [
+            (_to_utc(v.published_at), v.source)
+            for v in items
+            if v.published_at is not None
+        ]
     if published_candidates:
         earliest_time, earliest_source = min(published_candidates, key=lambda x: x[0])
         best.disclosed_at = earliest_time
@@ -70,7 +79,7 @@ def _merge_group(key: str, items: list[NormalizedVulnerability]) -> NormalizedVu
         best.published_at = earliest_time
 
     # Compute latest modified_at
-    modified_dates = [_ensure_aware(v.modified_at) for v in items if v.modified_at]
+    modified_dates = [_to_utc(v.modified_at) for v in items if v.modified_at]
     if modified_dates:
         best.modified_at = max(modified_dates)
 
