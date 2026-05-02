@@ -62,7 +62,7 @@ class ChatMessageWidget(QFrame):
         self.body.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.body.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.body.setObjectName("messageBody")
-        self.body.setFont(mono_font(10))
+        self.body.setFont(mono_font(12))
         self.body.setMinimumHeight(36)
         bubble_l.addWidget(self.body)
 

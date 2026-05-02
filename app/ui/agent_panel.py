@@ -136,6 +136,7 @@ QWidget#agentPanel QTextBrowser#messageBody {
     color: #d6ffd6;
     border: none;
     font-size: 14px;
+    line-height: 160%;
 }
 
 QFrame#dashboardShell {
