@@ -1,4 +1,4 @@
-"""Rcon AI Panel — immersive chat experience for vulnerability intelligence."""
+"""Rcon AI Panel — immersive landing page and chat for vulnerability intelligence."""
 
 import json
 import re
@@ -7,7 +7,7 @@ from PySide6.QtGui import QColor, QFont
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QFrame, QApplication, QSizePolicy, QGraphicsDropShadowEffect,
-    QScrollArea,
+    QScrollArea, QGridLayout,
 )
 from loguru import logger
 
@@ -17,26 +17,20 @@ from app.services.agent_tools import AgentToolService
 from app.services.agent_service import AgentService
 from app.services.agent_worker import AgentWorker
 
+CENTER_MAX_WIDTH = 1040
+COMPOSER_MAX_WIDTH = 980
 
-# ─── Colors (scoped to agent panel) ──────────────────────────────────
+# ─── Colors ───────────────────────────────────────────────────────────
 C = {
-    "bg":        "#0b0d12",
-    "bg2":       "#0f1219",
-    "surface":   "#111827",
-    "surface2":  "#1a2332",
-    "card":      "#111827",
-    "card_hover":"#1a2536",
-    "border":    "#1f2937",
-    "border2":   "#243044",
+    "bg":        "#080b11",
+    "surface":   "rgba(17, 24, 39, 0.96)",
+    "border":    "rgba(148, 163, 184, 0.12)",
+    "border_f":  "rgba(96, 165, 250, 0.55)",
     "blue":      "#3b82f6",
     "blue2":     "#2563eb",
-    "blue_dim":  "#1e3a5f",
-    "green":     "#22c55e",
-    "red":       "#ef4444",
-    "orange":    "#f59e0b",
     "text":      "#e5e7eb",
     "text2":     "#9ca3af",
-    "text3":     "#4b5563",
+    "text3":     "#7f8da3",
     "white":     "#f9fafb",
 }
 
@@ -48,24 +42,24 @@ QWidget#agentPanel {{
 }}
 
 QFrame#agentTopBar {{
-    background: rgba(11, 13, 18, 0.96);
+    background: #0b0f17;
     border-bottom: 1px solid {C['border']};
 }}
 
 QLabel#agentTitle {{
-    color: {C['text']};
-    font-size: 15px;
-    font-weight: 700;
+    color: #f9fafb;
+    font-size: 16px;
+    font-weight: 800;
 }}
 
 QLabel#agentSubtitle {{
-    color: {C['text2']};
+    color: {C['text3']};
     font-size: 12px;
 }}
 
 QWidget#agentPanel QFrame#assistantBubble {{
-    background: {C['surface']};
-    border: 1px solid {C['border2']};
+    background: #111827;
+    border: 1px solid rgba(148, 163, 184, 0.12);
     border-radius: 18px;
 }}
 
@@ -101,30 +95,35 @@ QWidget#agentPanel QTextBrowser#messageBody {{
 
 QWidget#agentPanel QFrame#composerWrap {{
     background: {C['bg']};
-    border-top: 1px solid {C['border']};
+    border-top: none;
 }}
 
 QWidget#agentPanel QFrame#composerShell {{
     background: {C['surface']};
-    border: 1px solid {C['border2']};
-    border-radius: 24px;
+    border: 1px solid {C['border']};
+    border-radius: 26px;
+}}
+
+QWidget#agentPanel QFrame#composerShell[focused="true"] {{
+    border: 1px solid {C['border_f']};
+    background: rgba(17, 24, 39, 1.0);
 }}
 
 QWidget#agentPanel QTextEdit#composerInput {{
     background: transparent;
-    color: {C['text']};
+    color: #f9fafb;
     border: none;
     font-size: 14px;
     padding: 2px;
 }}
 
 QWidget#agentPanel QPushButton#sendCircle {{
-    background: {C['text']};
-    color: {C['bg']};
+    background: #f9fafb;
+    color: #0b0f17;
     border: none;
     border-radius: 19px;
     font-size: 18px;
-    font-weight: 800;
+    font-weight: 900;
 }}
 
 QWidget#agentPanel QPushButton#sendCircle:hover {{
@@ -132,17 +131,17 @@ QWidget#agentPanel QPushButton#sendCircle:hover {{
 }}
 
 QWidget#agentPanel QPushButton#newBtn {{
-    background: {C['surface']};
+    background: rgba(17, 24, 39, 0.72);
     color: {C['blue']};
-    border: 1px solid {C['border2']};
+    border: 1px solid {C['border']};
     border-radius: 14px;
     padding: 5px 16px;
     font-size: 12px;
 }}
 
 QWidget#agentPanel QPushButton#newBtn:hover {{
-    background: {C['surface2']};
-    border-color: {C['blue']};
+    background: rgba(30, 41, 59, 0.82);
+    border-color: {C['border_f']};
 }}
 
 QWidget#agentPanel QPushButton#linkBtn {{
@@ -160,7 +159,7 @@ QWidget#agentPanel QFrame#chipFrame {{
 }}
 
 QWidget#agentPanel QPushButton#chipBtn {{
-    background: {C['surface']};
+    background: rgba(17, 24, 39, 0.72);
     color: {C['text2']};
     border: 1px solid {C['border']};
     border-radius: 16px;
@@ -169,9 +168,9 @@ QWidget#agentPanel QPushButton#chipBtn {{
 }}
 
 QWidget#agentPanel QPushButton#chipBtn:hover {{
-    background: {C['surface2']};
+    background: rgba(30, 41, 59, 0.82);
     color: {C['text']};
-    border-color: {C['blue_dim']};
+    border-color: {C['border_f']};
 }}
 
 QWidget#agentPanel QScrollArea {{ background: {C['bg']}; border: none; }}
@@ -179,140 +178,232 @@ QWidget#agentPanel QScrollBar:vertical {{
     background: {C['bg']}; width: 5px; border: none;
 }}
 QWidget#agentPanel QScrollBar::handle:vertical {{
-    background: {C['border2']}; border-radius: 2px; min-height: 30px;
+    background: rgba(148,163,184,0.18); border-radius: 2px; min-height: 30px;
 }}
-QWidget#agentPanel QScrollBar::handle:vertical:hover {{ background: {C['text3']}; }}
+QWidget#agentPanel QScrollBar::handle:vertical:hover {{ background: rgba(148,163,184,0.32); }}
 QWidget#agentPanel QScrollBar::add-line:vertical, QWidget#agentPanel QScrollBar::sub-line:vertical {{ height: 0; }}
+
+/* Dashboard */
+QFrame#heroCard {{
+    background: qlineargradient(x1:0,y1:0,x2:1,y2:1,
+        stop:0 #111827, stop:0.55 #0f172a, stop:1 #111827);
+    border: 1px solid rgba(96,165,250,0.18);
+    border-radius: 28px;
+}}
+
+QLabel#heroTitle {{
+    color: #f9fafb;
+    font-size: 30px;
+    font-weight: 900;
+}}
+
+QLabel#heroSubtitle {{
+    color: #9ca3af;
+    font-size: 14px;
+}}
+
+QLabel#sectionTitle {{
+    color: #9ca3af;
+    font-size: 13px;
+    font-weight: 600;
+}}
+
+/* MetricPill */
+QFrame#metricPill {{
+    background: rgba(17,24,39,0.82);
+    border: 1px solid {C['border']};
+    border-radius: 18px;
+}}
+
+QLabel#metricValue {{
+    font-size: 25px;
+    font-weight: 850;
+    font-family: Consolas;
+}}
+
+QLabel#metricLabel {{
+    color: #8b98aa;
+    font-size: 12px;
+}}
+
+/* PromptCard */
+QFrame#promptCard {{
+    background: rgba(17,24,39,0.72);
+    border: 1px solid {C['border']};
+    border-radius: 20px;
+}}
+
+QFrame#promptCard:hover {{
+    background: rgba(30,41,59,0.82);
+    border: 1px solid rgba(96,165,250,0.38);
+}}
+
+QLabel#promptTitle {{
+    color: #f3f4f6;
+    font-size: 14px;
+    font-weight: 750;
+}}
+
+QLabel#promptDesc {{
+    color: #8b98aa;
+    font-size: 12px;
+}}
+
+/* RiskFeedCard */
+QFrame#riskFeedCard {{
+    background: rgba(17,24,39,0.68);
+    border: 1px solid {C['border']};
+    border-radius: 18px;
+}}
+
+QFrame#riskFeedCard:hover {{
+    background: rgba(24,34,51,0.86);
+    border-color: rgba(96,165,250,0.32);
+}}
+
+QLabel#riskCve {{
+    color: #60a5fa;
+    font-size: 13px;
+    font-weight: 800;
+    font-family: Consolas;
+}}
+
+QLabel#riskTitle {{
+    color: #d1d5db;
+    font-size: 13px;
+}}
+
+QLabel#riskMeta {{
+    color: {C['text3']};
+    font-size: 11px;
+}}
+
+QLabel#riskScore {{
+    color: #f9fafb;
+    background: rgba(37,99,235,0.18);
+    border: 1px solid rgba(96,165,250,0.32);
+    border-radius: 26px;
+    font-size: 18px;
+    font-weight: 900;
+    font-family: Consolas;
+}}
 """
 
 
-# ─── Stat Card (dashboard) ──────────────────────────────────────────
-class StatCard(QFrame):
-    def __init__(self, label, value, color, parent=None):
+# ─── Metric Pill ──────────────────────────────────────────────────────
+class MetricPill(QFrame):
+    def __init__(self, label: str, value: str, accent: str, parent=None):
         super().__init__(parent)
-        self.setFixedSize(140, 80)
-        self.setCursor(Qt.PointingHandCursor)
+        self.setObjectName("metricPill")
+        self.setMinimumHeight(76)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(14, 12, 14, 10)
+        layout.setContentsMargins(16, 12, 16, 12)
         layout.setSpacing(4)
 
-        val = QLabel(str(value))
-        val.setStyleSheet(f"color:{color}; font-size:26px; font-weight:800; font-family:Consolas;")
-        layout.addWidget(val)
+        self.value_label = QLabel(str(value))
+        self.value_label.setObjectName("metricValue")
+        self.value_label.setStyleSheet(f"color: {accent};")
+        layout.addWidget(self.value_label)
 
         lbl = QLabel(label)
-        lbl.setStyleSheet(f"color:{C['text2']}; font-size:12px;")
+        lbl.setObjectName("metricLabel")
         layout.addWidget(lbl)
 
-        self.setStyleSheet(f"""
-            StatCard {{
-                background: {C['card']};
-                border: 1px solid {C['border']};
-                border-radius: 10px;
-            }}
-            StatCard:hover {{
-                border-color: {C['blue']};
-                background: {C['card_hover']};
-            }}
-        """)
-
-        glow = QGraphicsDropShadowEffect()
-        glow.setBlurRadius(8)
-        glow.setColor(QColor(color))
-        glow.setOffset(0, 0)
-        self.setGraphicsEffect(glow)
-
-    def set_value(self, v):
-        self.findChild(QLabel).setText(str(v))
+    def set_value(self, value):
+        self.value_label.setText(str(value))
 
 
-# ─── Vuln Card (dashboard) ──────────────────────────────────────────
-class VulnCard(QFrame):
+# ─── Prompt Card ──────────────────────────────────────────────────────
+class PromptCard(QFrame):
+    clicked = Signal(str)
+
+    def __init__(self, title: str, desc: str, prompt: str, icon: str = "✨", parent=None):
+        super().__init__(parent)
+        self.prompt = prompt
+        self.setObjectName("promptCard")
+        self.setCursor(Qt.PointingHandCursor)
+        self.setMinimumHeight(112)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(18, 16, 18, 16)
+        layout.setSpacing(8)
+
+        head = QLabel(f"{icon}  {title}")
+        head.setObjectName("promptTitle")
+        layout.addWidget(head)
+
+        body = QLabel(desc)
+        body.setObjectName("promptDesc")
+        body.setWordWrap(True)
+        layout.addWidget(body)
+
+        layout.addStretch(1)
+
+    def mousePressEvent(self, event):
+        self.clicked.emit(self.prompt)
+
+
+# ─── Risk Feed Card ───────────────────────────────────────────────────
+class RiskFeedCard(QFrame):
     clicked = Signal(dict)
 
-    def __init__(self, data, parent=None):
+    def __init__(self, data: dict, parent=None):
         super().__init__(parent)
         self._data = data
+        self.setObjectName("riskFeedCard")
         self.setCursor(Qt.PointingHandCursor)
-        self.setFixedHeight(64)
+        self.setMinimumHeight(86)
 
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(14, 8, 14, 8)
-        layout.setSpacing(12)
+        layout.setContentsMargins(16, 14, 16, 14)
+        layout.setSpacing(14)
+
+        left = QVBoxLayout()
+        left.setSpacing(6)
 
         cve = QLabel(data.get("cve_id", "N/A"))
-        cve.setStyleSheet(f"color:{C['blue']}; font-size:13px; font-weight:bold; font-family:Consolas;")
-        cve.setFixedWidth(140)
-        layout.addWidget(cve)
-
-        tags_layout = QHBoxLayout()
-        tags_layout.setSpacing(4)
-        sev = data.get("severity", "").upper()
-        if sev in ("CRITICAL", "HIGH"):
-            sev_color = C["red"] if sev == "CRITICAL" else C["orange"]
-            tag = QLabel(sev)
-            tag.setStyleSheet(f"color:{sev_color}; font-size:10px; font-weight:bold; "
-                              f"background:{sev_color}18; border:1px solid {sev_color}40; "
-                              f"border-radius:4px; padding:1px 5px;")
-            tags_layout.addWidget(tag)
-        if data.get("is_kev"):
-            tag = QLabel("KEV")
-            tag.setStyleSheet(f"color:{C['red']}; font-size:10px; font-weight:bold; "
-                              f"background:{C['red']}18; border:1px solid {C['red']}40; "
-                              f"border-radius:4px; padding:1px 5px;")
-            tags_layout.addWidget(tag)
-        if data.get("has_poc"):
-            tag = QLabel("PoC")
-            tag.setStyleSheet(f"color:{C['orange']}; font-size:10px; font-weight:bold; "
-                              f"background:{C['orange']}18; border:1px solid {C['orange']}40; "
-                              f"border-radius:4px; padding:1px 5px;")
-            tags_layout.addWidget(tag)
-        tags_layout.addStretch()
-        layout.addLayout(tags_layout)
-
-        cvss = data.get("cvss")
-        cvss_lbl = QLabel(f"CVSS {cvss:.1f}" if cvss else "CVSS -")
-        cvss_lbl.setStyleSheet(f"color:{C['text2']}; font-size:12px; font-family:Consolas;")
-        cvss_lbl.setFixedWidth(80)
-        layout.addWidget(cvss_lbl)
-
-        score = data.get("score", 0) or 0
-        if score >= 80:
-            sc_color = C["red"]
-        elif score >= 60:
-            sc_color = C["orange"]
-        elif score >= 40:
-            sc_color = C["blue"]
-        else:
-            sc_color = C["text3"]
-        sc_lbl = QLabel(f"{score:.0f}")
-        sc_lbl.setStyleSheet(f"color:{sc_color}; font-size:15px; font-weight:bold; font-family:Consolas;")
-        sc_lbl.setFixedWidth(36)
-        sc_lbl.setAlignment(Qt.AlignCenter)
-        layout.addWidget(sc_lbl)
+        cve.setObjectName("riskCve")
+        left.addWidget(cve)
 
         title = QLabel(data.get("title", ""))
-        title.setStyleSheet(f"color:{C['text2']}; font-size:12px;")
-        title.setWordWrap(False)
-        layout.addWidget(title, 1)
+        title.setObjectName("riskTitle")
+        title.setWordWrap(True)
+        title.setMaximumHeight(38)
+        left.addWidget(title)
 
-        self.setStyleSheet(f"""
-            VulnCard {{
-                background: {C['card']};
-                border: 1px solid {C['border']};
-                border-radius: 8px;
-            }}
-            VulnCard:hover {{
-                border-color: {C['blue_dim']};
-                background: {C['card_hover']};
-            }}
-        """)
+        meta = QLabel(self._meta_text(data))
+        meta.setObjectName("riskMeta")
+        left.addWidget(meta)
+
+        layout.addLayout(left, 1)
+
+        score = data.get("score", 0) or 0
+        badge = QLabel(f"{score:.0f}")
+        badge.setObjectName("riskScore")
+        badge.setAlignment(Qt.AlignCenter)
+        badge.setFixedSize(52, 52)
+        layout.addWidget(badge)
+
+    def _meta_text(self, data: dict) -> str:
+        parts = []
+        if data.get("cvss"):
+            parts.append(f"CVSS {data['cvss']:.1f}")
+        if data.get("is_kev"):
+            parts.append("KEV")
+        if data.get("has_poc"):
+            parts.append("PoC")
+        sev = data.get("severity")
+        if sev:
+            parts.append(str(sev).upper())
+        return " · ".join(parts) or "暂无结构化风险标签"
 
     def mousePressEvent(self, event):
         self.clicked.emit(self._data)
 
 
-# ─── Main Agent Panel ───────────────────────────────────────────────
+# ─── Main Agent Panel ─────────────────────────────────────────────────
 class AgentPanel(QWidget):
 
     def __init__(self, config, db_session_factory, parent=None):
@@ -356,7 +447,7 @@ class AgentPanel(QWidget):
         title.setObjectName("agentTitle")
         tb.addWidget(title)
         tb.addSpacing(10)
-        subtitle = QLabel("面向漏洞情报和风险优先级的安全助手")
+        subtitle = QLabel("本地漏洞情报助手")
         subtitle.setObjectName("agentSubtitle")
         tb.addWidget(subtitle)
         tb.addStretch()
@@ -387,8 +478,8 @@ class AgentPanel(QWidget):
         self.chat_container = QWidget()
         self.chat_container.setObjectName("chatPage")
         self.chat_layout = QVBoxLayout(self.chat_container)
-        self.chat_layout.setContentsMargins(0, 24, 0, 24)
-        self.chat_layout.setSpacing(4)
+        self.chat_layout.setContentsMargins(0, 36, 0, 36)
+        self.chat_layout.setSpacing(8)
         self.chat_layout.addStretch(1)
         self.chat_scroll.setWidget(self.chat_container)
         self.chat_scroll.hide()
@@ -396,7 +487,7 @@ class AgentPanel(QWidget):
 
         root.addWidget(self.content_stack, 1)
 
-        # ── Quick Actions ──────────────────────────────────────────
+        # ── Quick Actions Chips ────────────────────────────────────
         self.chip_frame = QFrame()
         self.chip_frame.setObjectName("chipFrame")
         chip_l = QHBoxLayout(self.chip_frame)
@@ -412,96 +503,125 @@ class AgentPanel(QWidget):
         chip_l.addStretch()
         root.addWidget(self.chip_frame)
 
-        # ── Composer ───────────────────────────────────────────────
+        # ── Composer (centered max-width) ──────────────────────────
         composer_wrap = QFrame()
         composer_wrap.setObjectName("composerWrap")
-        wrap_l = QVBoxLayout(composer_wrap)
-        wrap_l.setContentsMargins(120, 12, 120, 18)
+        wrap_l = QHBoxLayout(composer_wrap)
+        wrap_l.setContentsMargins(32, 10, 32, 18)
+        wrap_l.setSpacing(0)
 
         self.composer = ChatComposer()
+        self.composer.setMaximumWidth(COMPOSER_MAX_WIDTH)
         self.composer.submitted.connect(self._send)
-        wrap_l.addWidget(self.composer)
+
+        wrap_l.addStretch(1)
+        wrap_l.addWidget(self.composer, 1)
+        wrap_l.addStretch(1)
 
         root.addWidget(composer_wrap)
 
     def _build_dashboard(self):
-        """Build the dashboard with stat cards and vuln list."""
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.NoFrame)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
 
         page = QWidget()
-        layout = QVBoxLayout(page)
-        layout.setContentsMargins(32, 28, 32, 20)
-        layout.setSpacing(24)
+        page_layout = QHBoxLayout(page)
+        page_layout.setContentsMargins(32, 32, 32, 28)
+        page_layout.setSpacing(0)
 
-        # Header
-        header = QHBoxLayout()
-        header.setSpacing(12)
+        shell = QFrame()
+        shell.setObjectName("dashboardShell")
+        shell.setMaximumWidth(CENTER_MAX_WIDTH)
 
-        logo = QLabel("R")
-        logo.setFixedSize(48, 48)
-        logo.setAlignment(Qt.AlignCenter)
-        logo.setStyleSheet(
-            f"color:{C['white']}; background:qlineargradient(x1:0,y1:0,x2:1,y2:1,"
-            f"stop:0 {C['blue2']},stop:1 {C['blue']});"
-            f"border-radius:12px; font-size:22px; font-weight:900; font-family:Consolas;"
-        )
-        header.addWidget(logo)
+        layout = QVBoxLayout(shell)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(22)
 
-        info = QVBoxLayout()
-        info.setSpacing(2)
-        t = QLabel("Rcon")
-        t.setStyleSheet(f"color:{C['text']}; font-size:20px; font-weight:700;")
-        info.addWidget(t)
-        s = QLabel("漏洞情报侦察兵")
-        s.setStyleSheet(f"color:{C['text2']}; font-size:13px;")
-        info.addWidget(s)
-        header.addLayout(info)
-        header.addStretch()
-        layout.addLayout(header)
+        # ── Hero ────────────────────────────────────────────────────
+        hero = QFrame()
+        hero.setObjectName("heroCard")
+        hero_l = QVBoxLayout(hero)
+        hero_l.setContentsMargins(28, 28, 28, 28)
+        hero_l.setSpacing(10)
 
-        # Stat Cards
-        stats_label = QLabel("数据概览")
-        stats_label.setStyleSheet(f"color:{C['text2']}; font-size:13px; font-weight:600; margin-top:4px;")
-        layout.addWidget(stats_label)
+        hero_title = QLabel("Rcon AI")
+        hero_title.setObjectName("heroTitle")
+        hero_l.addWidget(hero_title)
 
-        self.stats_grid = QHBoxLayout()
-        self.stats_grid.setSpacing(14)
+        hero_sub = QLabel("询问漏洞、CVE、KEV、EPSS、修复优先级")
+        hero_sub.setObjectName("heroSubtitle")
+        hero_sub.setWordWrap(True)
+        hero_l.addWidget(hero_sub)
 
-        self.card_total = StatCard("总漏洞", "—", C["blue"])
-        self.card_kev = StatCard("KEV 命中", "—", C["red"])
-        self.card_unread = StatCard("未读", "—", C["orange"])
-        self.card_high = StatCard("高危 ≥80", "—", C["red"])
+        layout.addWidget(hero)
+
+        # ── Metrics ─────────────────────────────────────────────────
+        metrics = QHBoxLayout()
+        metrics.setSpacing(12)
+
+        self.card_total = MetricPill("总漏洞", "—", "#93c5fd")
+        self.card_kev = MetricPill("KEV 命中", "—", "#fca5a5")
+        self.card_unread = MetricPill("未读", "—", "#fcd34d")
+        self.card_high = MetricPill("高危 ≥80", "—", "#f87171")
 
         for card in [self.card_total, self.card_kev, self.card_unread, self.card_high]:
-            self.stats_grid.addWidget(card)
-        self.stats_grid.addStretch()
-        layout.addLayout(self.stats_grid)
+            metrics.addWidget(card)
 
-        # Vuln List
-        vuln_header = QHBoxLayout()
-        vh_label = QLabel("最近漏洞")
-        vh_label.setStyleSheet(f"color:{C['text2']}; font-size:13px; font-weight:600;")
-        vuln_header.addWidget(vh_label)
-        vuln_header.addStretch()
+        layout.addLayout(metrics)
+
+        # ── Prompt Cards ────────────────────────────────────────────
+        prompt_grid = QGridLayout()
+        prompt_grid.setSpacing(12)
+
+        prompts = [
+            ("今日优先处置", "让 Rcon 汇总当前最值得优先修复的风险。",
+             "根据本地漏洞数据库，总结当前最值得优先处置的漏洞，并说明排序原因。", "🔥"),
+            ("KEV 命中分析", "查看存在在野利用证据的关键漏洞。",
+             "高危 Top10", "🎯"),
+            ("最近新增漏洞", "快速浏览最近同步进来的漏洞情报。",
+             "最近漏洞", "🛰️"),
+            ("修复优先级清单", "生成面向安全运营的处置建议。",
+             "请根据当前漏洞库生成一份修复优先级清单，按紧急程度分组，并给出修复建议。", "🛠️"),
+        ]
+
+        for i, (p_title, desc, prompt, icon) in enumerate(prompts):
+            card = PromptCard(p_title, desc, prompt, icon)
+            card.clicked.connect(self._send_prompt)
+            prompt_grid.addWidget(card, i // 2, i % 2)
+
+        layout.addLayout(prompt_grid)
+
+        # ── Recent Risk Feed ────────────────────────────────────────
+        header = QHBoxLayout()
+        label = QLabel("最近风险动态")
+        label.setObjectName("sectionTitle")
+        header.addWidget(label)
+        header.addStretch()
 
         self.btn_more = QPushButton("查看全部 →")
         self.btn_more.setObjectName("linkBtn")
         self.btn_more.setCursor(Qt.PointingHandCursor)
         self.btn_more.clicked.connect(lambda: self._on_chip("最近漏洞"))
-        vuln_header.addWidget(self.btn_more)
-        layout.addLayout(vuln_header)
+        header.addWidget(self.btn_more)
+
+        layout.addLayout(header)
 
         self.vuln_list = QVBoxLayout()
-        self.vuln_list.setSpacing(6)
+        self.vuln_list.setSpacing(8)
         layout.addLayout(self.vuln_list)
 
-        layout.addStretch()
+        layout.addStretch(1)
+
+        page_layout.addStretch(1)
+        page_layout.addWidget(shell, 1)
+        page_layout.addStretch(1)
+
         scroll.setWidget(page)
         return scroll
 
+    # ── Dashboard Data ──────────────────────────────────────────────
     def _clear_vuln_list(self):
         while self.vuln_list.count():
             item = self.vuln_list.takeAt(0)
@@ -527,10 +647,10 @@ class AgentPanel(QWidget):
                 empty.setStyleSheet("color:#3d4450; font-size:13px; padding:16px;")
                 self.vuln_list.addWidget(empty)
             else:
-                for v in vulns:
-                        card = VulnCard(v)
-                        card.clicked.connect(lambda d=v: self._on_vuln_click(d))
-                        self.vuln_list.addWidget(card)
+                for v in vulns[:5]:
+                    card = RiskFeedCard(v)
+                    card.clicked.connect(lambda d=v: self._on_vuln_click(d))
+                    self.vuln_list.addWidget(card)
         except Exception as e:
             logger.error(f"Dashboard load error: {e}")
 
@@ -555,6 +675,7 @@ class AgentPanel(QWidget):
     # ── Message Helpers ─────────────────────────────────────────────
     def _show_chat(self):
         self.dashboard.hide()
+        self.chip_frame.hide()
         self.chat_scroll.show()
 
     def _append_user(self, text: str):
@@ -575,7 +696,7 @@ class AgentPanel(QWidget):
         QTimer.singleShot(30, lambda: smooth_scroll_to_bottom(self.chat_scroll))
         return msg
 
-    # ── Streaming (single-widget update, no delete/recreate) ────────
+    # ── Streaming ───────────────────────────────────────────────────
     def _stream_assistant(self, text: str):
         self._streaming = True
         msg = self._append_assistant()
@@ -588,6 +709,9 @@ class AgentPanel(QWidget):
         QTimer.singleShot(max(280, min(1800, len(text) * 4)), renderer.finish)
 
     # ── Actions ─────────────────────────────────────────────────────
+    def _send_prompt(self, prompt: str):
+        self._send(prompt)
+
     def _on_chip(self, label):
         mapping = {"数据库概览": "stats", "最近漏洞": "recent", "高危 Top10": "top_risk"}
         qtype = mapping.get(label)
@@ -621,7 +745,6 @@ class AgentPanel(QWidget):
         if not normalized:
             return None
 
-        # CVE query — always highest priority, any position
         cve_match = re.search(r"\bCVE[-\s]?(\d{4})[-\s]?(\d{4,})\b", normalized, re.I)
         if cve_match:
             cve_id = f"CVE-{cve_match.group(1)}-{cve_match.group(2)}"
@@ -714,8 +837,9 @@ class AgentPanel(QWidget):
         self._history.clear()
         self._streaming = False
         self._busy = False
-        self._current_stream = None
         self._current_ai_msg = None
+        self.composer.set_generating(False)
         self.chat_scroll.hide()
         self.dashboard.show()
+        self.chip_frame.show()
         self._load_dashboard()

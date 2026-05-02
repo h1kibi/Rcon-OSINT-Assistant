@@ -68,9 +68,13 @@ class ChatMessageWidget(QFrame):
             outer.addWidget(self.bubble, 0)
             outer.addWidget(self.avatar, 0, Qt.AlignTop)
         else:
+            self.bubble.setMaximumWidth(820)
             outer.addWidget(self.avatar, 0, Qt.AlignTop)
             outer.addWidget(self.bubble, 0)
             outer.addStretch(1)
+
+        if role == "user":
+            self.bubble.setMaximumWidth(680)
 
     def set_text(self, text: str, markdown: bool = True):
         self._raw_text = text or ""
@@ -92,6 +96,7 @@ class ChatComposer(QFrame):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setObjectName("composerShell")
+        self.setProperty("focused", False)
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(14, 10, 10, 10)
@@ -121,10 +126,23 @@ class ChatComposer(QFrame):
         self.send_btn.setText("■" if generating else "↑")
 
     def eventFilter(self, obj, event):
-        if obj is self.input and event.type() == QEvent.Type.KeyPress:
-            if event.key() in (Qt.Key_Return, Qt.Key_Enter):
-                if event.modifiers() & Qt.ShiftModifier:
-                    return False
-                self._emit_submit()
-                return True
+        if obj is self.input:
+            if event.type() == QEvent.Type.FocusIn:
+                self._set_focused(True)
+            elif event.type() == QEvent.Type.FocusOut:
+                self._set_focused(False)
+            elif event.type() == QEvent.Type.KeyPress:
+                if event.key() in (Qt.Key_Return, Qt.Key_Enter):
+                    if event.modifiers() & Qt.ShiftModifier:
+                        return False
+                    self._emit_submit()
+                    return True
         return super().eventFilter(obj, event)
+
+    def _set_focused(self, focused: bool):
+        if self.property("focused") == focused:
+            return
+        self.setProperty("focused", focused)
+        self.style().unpolish(self)
+        self.style().polish(self)
+        self.update()
