@@ -3,7 +3,7 @@ from loguru import logger
 from sqlmodel import Session, select, col, func
 from app.collectors.base import RawAdvisory, CollectorResult
 from app.db import repositories as repo
-from app.db.models import SourceRecord, CollectorStatus
+from app.db.models import SourceRecord, CollectorStatus, Vulnerability
 from app.pipeline.normalizer import normalize
 from app.pipeline.deduplicator import deduplicate
 from app.pipeline.scorer import calculate_score, ScorerConfig, ScoreResult
