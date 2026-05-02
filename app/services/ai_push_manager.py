@@ -12,6 +12,7 @@ from app.services.ai_push_service import (
     build_vuln_push_payload,
     build_rule_based_push,
     build_ai_push_prompt,
+    build_push_context_hash,
 )
 from app.ui.ai_push_window import AIPushWorker
 
@@ -98,7 +99,7 @@ class AIPushManager(QObject):
 
             if not items:
                 rule_md = "# AI推送\n\n暂无符合条件的高危漏洞。"
-                content_hash = hashlib.sha256(rule_md.encode("utf-8")).hexdigest()
+                content_hash = build_push_context_hash(items)
                 repo.save_ai_push_report_ready(
                     session, report.id, rule_content=rule_md, ai_content="",
                     final_content=rule_md, prompt="", context_json="[]",
@@ -112,10 +113,21 @@ class AIPushManager(QObject):
                 self._emit_alert_count(session)
                 return
 
+            context_hash = build_push_context_hash(items)
+
+            # Skip if same candidates already produced a ready report
+            latest_ready = repo.get_latest_ready_ai_push_report(session)
+            has_new_alert_now = repo.count_unalerted_high_risk_candidates(session) > 0
+            if latest_ready and latest_ready.content_hash == context_hash and not has_new_alert_now:
+                self._status = "idle"
+                self.report_ready.emit(latest_ready.id)
+                self._emit_alert_count(session)
+                return
+
             rule_md = build_rule_based_push(items)
             prompt = build_ai_push_prompt(items)
             context_json = json.dumps(items, ensure_ascii=False, default=str)
-            content_hash = hashlib.sha256(rule_md.encode("utf-8")).hexdigest()
+            content_hash_from_rule = hashlib.sha256(rule_md.encode("utf-8")).hexdigest()
 
             repo.add_ai_push_report_items(session, report.id, items)
             new_count = repo.upsert_high_risk_alerts(session, report.id, items)
@@ -127,7 +139,7 @@ class AIPushManager(QObject):
                 repo.save_ai_push_report_ready(
                     session, report.id, rule_content=rule_md, ai_content="",
                     final_content=rule_md, prompt=prompt, context_json=context_json,
-                    content_hash=content_hash, model="rule-based",
+                    content_hash=context_hash, model="rule-based",
                     candidate_count=len(items), high_risk_count=len(items),
                     new_high_risk_count=new_count, status="ready_rule",
                 )
@@ -138,7 +150,7 @@ class AIPushManager(QObject):
                 return
 
             self._status = "generating_ai"
-            self._start_worker(report.id, agent_cfg, prompt, rule_md, context_json, items, new_count)
+            self._start_worker(report.id, agent_cfg, prompt, rule_md, context_json, context_hash, items, new_count)
         except Exception as e:
             logger.exception("AI push generation failed")
             if report_id:
@@ -151,20 +163,20 @@ class AIPushManager(QObject):
         finally:
             session.close()
 
-    def _start_worker(self, report_id, agent_cfg, prompt, rule_md, context_json, items, new_count):
+    def _start_worker(self, report_id, agent_cfg, prompt, rule_md, context_json, context_hash, items, new_count):
         self._worker = AIPushWorker(agent_cfg, prompt, self)
         self._worker.response_ready.connect(
-            lambda text: self._on_ai_ok(report_id, text, rule_md, prompt, context_json, items, new_count)
+            lambda text: self._on_ai_ok(report_id, text, rule_md, prompt, context_json, context_hash, items, new_count)
         )
         self._worker.error_occurred.connect(
-            lambda err: self._on_ai_err(report_id, err, rule_md, prompt, context_json, items, new_count)
+            lambda err: self._on_ai_err(report_id, err, rule_md, prompt, context_json, context_hash, items, new_count)
         )
         self._worker.start()
 
-    def _on_ai_ok(self, report_id, text, rule_md, prompt, context_json, items, new_count):
+    def _on_ai_ok(self, report_id, text, rule_md, prompt, context_json, context_hash, items, new_count):
         session = self.session_factory()
         try:
-            content_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()
+            content_hash = context_hash
             cfg = self.get_config()
             model = getattr(cfg.agent, "model", "unknown") if hasattr(cfg, "agent") else "unknown"
             repo.save_ai_push_report_ready(
@@ -189,10 +201,10 @@ class AIPushManager(QObject):
             self._status = "idle"
             session.close()
 
-    def _on_ai_err(self, report_id, err, rule_md, prompt, context_json, items, new_count):
+    def _on_ai_err(self, report_id, err, rule_md, prompt, context_json, context_hash, items, new_count):
         session = self.session_factory()
         try:
-            content_hash = hashlib.sha256(rule_md.encode("utf-8")).hexdigest()
+            content_hash = context_hash
             repo.save_ai_push_report_ready(
                 session, report_id, rule_content=rule_md, ai_content="",
                 final_content=rule_md, prompt=prompt, context_json=context_json,

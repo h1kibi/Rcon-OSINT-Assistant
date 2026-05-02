@@ -53,6 +53,10 @@ def run_migrations(session: Session):
         _add_collector_status_columns(session)
         _mark_applied(session, 3)
 
+    if 4 not in applied:
+        _create_ai_push_indexes(session)
+        _mark_applied(session, 4)
+
     logger.info(f"Schema at version(s): {sorted(_get_applied_versions(session))}")
 
 
@@ -202,3 +206,16 @@ def _create_sort_indexes(session: Session):
         session.execute(text(idx_sql))
     session.commit()
     logger.info("Sort composite indexes created")
+
+
+def _create_ai_push_indexes(session: Session):
+    for ddl in [
+        "CREATE INDEX IF NOT EXISTS ix_ai_push_reports_status_updated ON ai_push_reports(status, updated_at DESC)",
+        "CREATE INDEX IF NOT EXISTS ix_ai_push_report_items_report ON ai_push_report_items(report_id, vulnerability_id)",
+        "CREATE INDEX IF NOT EXISTS ix_high_risk_alerts_status ON high_risk_alerts(status)",
+        "CREATE INDEX IF NOT EXISTS ix_high_risk_alerts_latest_report ON high_risk_alerts(latest_report_id)",
+        "CREATE INDEX IF NOT EXISTS ix_personal_library_entries_type_created ON personal_library_entries(entry_type, archived, created_at DESC)",
+    ]:
+        session.execute(text(ddl))
+    session.commit()
+    logger.info("AI push indexes created")

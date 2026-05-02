@@ -1,12 +1,12 @@
 """AI Push briefing window."""
 
-import httpx
 from PySide6.QtCore import Qt, Signal, QThread
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QTextBrowser,
     QPushButton, QApplication,
 )
 from loguru import logger
+from app.services.llm_client import call_chat_completion, LLMClientError
 
 
 class AIPushWorker(QThread):
@@ -20,32 +20,15 @@ class AIPushWorker(QThread):
 
     def run(self):
         try:
-            result = self._call_llm()
+            result = call_chat_completion(
+                self.agent_config,
+                system_prompt="你是专业漏洞情报分析员，只基于用户提供的数据生成推送，不编造信息。",
+                user_prompt=self.prompt,
+            )
             self.response_ready.emit(result)
         except Exception as e:
             logger.exception("AI push generation failed")
             self.error_occurred.emit(f"{type(e).__name__}: {e}")
-
-    def _call_llm(self) -> str:
-        base_url = self.agent_config.base_url.rstrip("/")
-        url = f"{base_url}/chat/completions"
-        headers = {
-            "Authorization": f"Bearer {self.agent_config.api_key}",
-            "Content-Type": "application/json",
-        }
-        payload = {
-            "model": self.agent_config.model,
-            "messages": [
-                {"role": "system", "content": "你是专业漏洞情报分析员，只基于用户提供的数据生成推送，不编造信息。"},
-                {"role": "user", "content": self.prompt},
-            ],
-            "temperature": 0.2,
-            "max_tokens": getattr(self.agent_config, "max_tokens", 3000),
-        }
-        resp = httpx.post(url, headers=headers, json=payload, timeout=60)
-        resp.raise_for_status()
-        data = resp.json()
-        return data["choices"][0]["message"]["content"]
 
 
 STYLE = """
