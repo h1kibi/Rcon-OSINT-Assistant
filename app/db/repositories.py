@@ -204,6 +204,8 @@ def get_vulnerabilities(
         order = (Vulnerability.status == "ignored").asc(), Vulnerability.action_value_score.desc()
 
     stmt = stmt.order_by(*order) if isinstance(order, tuple) else stmt.order_by(order)
+    stmt = stmt.offset(offset).limit(limit)
+    return list(session.exec(stmt).all())
 
 
 def get_vulnerability_by_id(session: Session, vuln_id: int) -> Optional[Vulnerability]:
