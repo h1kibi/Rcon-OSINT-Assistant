@@ -457,10 +457,10 @@ def main():
 
     def _after_sync_done():
         """Unified post-sync handler: UI refresh, pending config, coalesced sync."""
-        main_window.load_data()
-        update_badge()
-        if hasattr(main_window, "agent_panel"):
-            main_window.agent_panel.refresh_dashboard()
+        # Restore update button
+        main_window.btn_update_database.setEnabled(True)
+        main_window.btn_update_database.setText(" 更新数据库")
+        refresh_local_ui()
 
         # Pending config wins first
         cfg = _pending_config[0]
@@ -475,15 +475,38 @@ def main():
 
         if sync_pending[0]:
             sync_pending[0] = False
-            QTimer.singleShot(500, sync_func)
+            QTimer.singleShot(500, update_database)
 
     sync_signals.sync_done.connect(_after_sync_done)
-    sync_signals.sync_failed.connect(lambda err: main_window.status_label.setText(f"同步失败: {err}"))
+    sync_signals.sync_failed.connect(lambda err: (
+        main_window.status_label.setText(f"同步失败: {err}"),
+        setattr(main_window.btn_update_database, "enabled", True),
+        main_window.btn_update_database.setText(" 更新数据库")
+    ))
 
-    def sync_func():
+    def update_database():
+        """Fetch new data from internet, update local database."""
+        if sync_lock.locked():
+            sync_pending[0] = True
+            main_window.status_label.setText("数据库更新正在进行中，已合并为下一次更新")
+            return
+        main_window.status_label.setText("正在更新数据库...")
+        main_window.btn_update_database.setEnabled(False)
+        main_window.btn_update_database.setText(" 更新中...")
+
         def _worker():
             run_sync_locked()
         threading.Thread(target=_worker, daemon=True).start()
+
+    def refresh_local_ui():
+        """Refresh local UI only. No network, no collectors, no AI generation."""
+        main_window.load_data()
+        update_badge()
+        if hasattr(main_window, "agent_panel"):
+            main_window.agent_panel.refresh_dashboard()
+        if hasattr(main_window, "ai_push_manager"):
+            main_window.ai_push_manager.refresh_alert_count()
+        main_window.status_label.setText("已刷新本地显示")
 
     def sync_scheduler_recreate():
         return SyncScheduler(
@@ -554,12 +577,13 @@ def main():
     floating_ball.open_main.connect(main_window.show)
     floating_ball.open_main.connect(main_window.raise_)
     floating_ball.open_main.connect(main_window.activateWindow)
-    floating_ball.open_main.connect(main_window.load_data)  # Refresh data on open
+    floating_ball.open_main.connect(main_window.load_data)
     floating_ball.quit_app.connect(app.quit)
     floating_ball.toggle_pause.connect(
         lambda: _toggle_pause(floating_ball, sync_scheduler)
     )
-    floating_ball.refresh_now.connect(sync_func)
+    floating_ball.refresh_now.connect(refresh_local_ui)
+    floating_ball.update_database_requested.connect(update_database)
     floating_ball.open_settings.connect(main_window._open_settings)
     floating_ball.ai_push_requested.connect(lambda: _open_ai_push())
 
@@ -567,7 +591,7 @@ def main():
     ai_push_manager = AIPushManager(
         session_factory=get_session,
         get_config=get_settings,
-        request_sync=sync_func,
+        request_sync=update_database,
         parent=main_window,
     )
     main_window.ai_push_manager = ai_push_manager
@@ -592,7 +616,8 @@ def main():
         except Exception:
             logger.exception("Open AI push failed")
 
-    main_window.refresh_requested.connect(sync_func)
+    main_window.refresh_requested.connect(refresh_local_ui)
+    main_window.database_update_requested.connect(update_database)
     main_window.rescore_requested.connect(
         lambda: _rescore_all(get_settings(), get_scorer())
     )
@@ -600,7 +625,7 @@ def main():
     # Start scheduler if any collectors are enabled
     if get_collectors():
         sync_scheduler.start(run_immediately=False)
-        QTimer.singleShot(2000, sync_func)
+        QTimer.singleShot(2000, update_database)
     else:
         logger.info("No collectors enabled; periodic sync skipped")
 

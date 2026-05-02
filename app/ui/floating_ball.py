@@ -12,7 +12,8 @@ class RobotOrb(QWidget):
     """Tactical reconnaissance AI robot floating orb."""
 
     open_main = Signal()
-    refresh_now = Signal()
+    refresh_now = Signal()               # 本地刷新 UI
+    update_database_requested = Signal() # 联网更新数据库
     toggle_pause = Signal()
     open_settings = Signal()
     ai_push_requested = Signal()
@@ -344,7 +345,8 @@ class RobotOrb(QWidget):
         """)
         items = [
             ("打开面板", self.open_main),
-            ("立即同步", self.refresh_now),
+            ("刷新显示", self.refresh_now),
+            ("更新数据库", self.update_database_requested),
             ("AI推送", self.ai_push_requested),
             ("恢复采集" if self._paused else "暂停采集", self.toggle_pause),
             None,

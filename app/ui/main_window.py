@@ -146,7 +146,8 @@ class SidebarButton(QToolButton):
 class MainWindow(QMainWindow):
     """Main vulnerability intelligence window."""
 
-    refresh_requested = Signal()
+    refresh_requested = Signal()           # 本地刷新 UI，不联网
+    database_update_requested = Signal()   # 联网更新数据库
     rescore_requested = Signal()
     config_changed = Signal(object)  # Emitted when config is saved, carries new config
 
@@ -284,9 +285,25 @@ class MainWindow(QMainWindow):
 
         row2.addStretch()
 
-        # Refresh button - bigger, on the sort row
-        self.btn_quick_refresh = QPushButton("🔄 刷新")
-        self.btn_quick_refresh.setToolTip("同步刷新数据")
+        # Update database button - network sync
+        self.btn_update_database = QPushButton(" 更新数据库")
+        self.btn_update_database.setToolTip("从互联网拉取最新漏洞情报，更新本地数据库，并生成 AI 推送")
+        self.btn_update_database.setFixedHeight(28)
+        self.btn_update_database.setStyleSheet("""
+            QPushButton {
+                background: #8957e5; color: white; border: 1px solid #a371f7;
+                border-radius: 5px; font-size: 13px; padding: 4px 14px;
+                font-weight: bold;
+            }
+            QPushButton:hover { background: #a371f7; }
+            QPushButton:disabled { background: #30363d; color: #8b949e; border-color: #30363d; }
+        """)
+        self.btn_update_database.clicked.connect(self.database_update_requested.emit)
+        row2.addWidget(self.btn_update_database)
+
+        # Local refresh button - no network
+        self.btn_quick_refresh = QPushButton(" 刷新显示")
+        self.btn_quick_refresh.setToolTip("仅刷新本地显示、重新排序和更新状态，不联网拉取数据")
         self.btn_quick_refresh.setFixedHeight(28)
         self.btn_quick_refresh.setStyleSheet("""
             QPushButton {
@@ -295,7 +312,6 @@ class MainWindow(QMainWindow):
                 font-weight: bold;
             }
             QPushButton:hover { background: #388bfd; }
-            QPushButton:pressed { background: #1158c7; }
         """)
         self.btn_quick_refresh.clicked.connect(self.refresh_requested.emit)
         row2.addWidget(self.btn_quick_refresh)
