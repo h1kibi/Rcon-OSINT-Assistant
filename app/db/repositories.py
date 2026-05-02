@@ -332,11 +332,16 @@ def save_source_record(session: Session, record: SourceRecord):
         select(SourceRecord).where(
             SourceRecord.vulnerability_id == record.vulnerability_id,
             SourceRecord.source == record.source,
+            SourceRecord.source_id == record.source_id,
         )
     ).first()
     if existing:
         existing.raw_json = record.raw_json or existing.raw_json
         existing.raw_html = record.raw_html or existing.raw_html
+        existing.published_at = record.published_at or existing.published_at
+        existing.modified_at = record.modified_at or existing.modified_at
+        existing.url = record.url or existing.url
+        existing.title = record.title or existing.title
         existing.fetched_at = record.fetched_at
         session.add(existing)
     else:

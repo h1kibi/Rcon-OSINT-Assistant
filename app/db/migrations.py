@@ -45,7 +45,35 @@ def create_triggers(session: Session):
     logger.info("FTS5 triggers created")
 
 
+def run_schema_migrations(session: Session):
+    """Lightweight SQLite schema migration for new columns."""
+    vuln_cols = {row[1] for row in session.execute(text("PRAGMA table_info(vulnerabilities)"))}
+    if "disclosed_at" not in vuln_cols:
+        session.execute(text("ALTER TABLE vulnerabilities ADD COLUMN disclosed_at DATETIME"))
+    if "disclosed_source" not in vuln_cols:
+        session.execute(text("ALTER TABLE vulnerabilities ADD COLUMN disclosed_source VARCHAR DEFAULT ''"))
+    session.execute(text(
+        "CREATE INDEX IF NOT EXISTS ix_vulnerabilities_disclosed_at ON vulnerabilities(disclosed_at)"
+    ))
+
+    src_cols = {row[1] for row in session.execute(text("PRAGMA table_info(source_records)"))}
+    if "published_at" not in src_cols:
+        session.execute(text("ALTER TABLE source_records ADD COLUMN published_at DATETIME"))
+    if "modified_at" not in src_cols:
+        session.execute(text("ALTER TABLE source_records ADD COLUMN modified_at DATETIME"))
+    if "url" not in src_cols:
+        session.execute(text("ALTER TABLE source_records ADD COLUMN url VARCHAR DEFAULT ''"))
+    if "title" not in src_cols:
+        session.execute(text("ALTER TABLE source_records ADD COLUMN title VARCHAR DEFAULT ''"))
+    session.execute(text(
+        "CREATE INDEX IF NOT EXISTS ix_source_records_published_at ON source_records(published_at)"
+    ))
+    session.commit()
+    logger.info("Schema migrations completed")
+
+
 def run_migrations(session: Session):
     """Run all migrations."""
     create_fts5(session)
     create_triggers(session)
+    run_schema_migrations(session)

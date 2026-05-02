@@ -14,7 +14,10 @@ def deduplicate(vulns: list[NormalizedVulnerability]) -> list[NormalizedVulnerab
     merged = []
     for key, items in groups.items():
         if len(items) == 1:
-            merged.append(items[0])
+            item = items[0]
+            item.disclosed_at = item.published_at
+            item.disclosed_source = item.source
+            merged.append(item)
             continue
 
         best = _merge_group(key, items)

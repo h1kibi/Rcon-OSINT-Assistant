@@ -44,6 +44,8 @@ class NormalizedVulnerability:
     affected_products: list[dict] = field(default_factory=list)
     published_at: datetime | None = None
     modified_at: datetime | None = None
+    disclosed_at: datetime | None = None
+    disclosed_source: str = ""
     source: str = ""
     source_confidence_score: float = 50.0
     raw_json: str = ""

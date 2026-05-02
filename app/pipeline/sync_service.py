@@ -66,6 +66,14 @@ def run_sync_service(
     normalized = normalize(all_raw, collectors)
     logger.info(f"Normalized: {len(normalized)}")
 
+    # Build source evidence map BEFORE dedup (preserve per-source timeline)
+    from collections import defaultdict
+    source_evidence = defaultdict(list)
+    for item in normalized:
+        key = item.cve_id or item.ghsa_id or item.osv_id or item.primary_key_id
+        if key:
+            source_evidence[key].append(item)
+
     # Deduplicate
     deduped = deduplicate(normalized)
     logger.info(f"Deduplicated: {len(deduped)}")
@@ -128,6 +136,8 @@ def run_sync_service(
             source_confidence_score=nv.source_confidence_score,
             action_value_score=score,
             action_value_reason="\n".join(reasons),
+            disclosed_at=nv.disclosed_at or nv.published_at,
+            disclosed_source=nv.disclosed_source or nv.source,
             published_at=nv.published_at,
             modified_at=nv.modified_at,
             source=nv.source,
@@ -135,27 +145,29 @@ def run_sync_service(
         )
         saved = repo.upsert_vulnerability(session, vuln)
 
-        # Save source record with timeline data
-        primary_url = ""
-        if nv.references:
-            for ref in nv.references:
-                url = ref.get("url", "")
-                if url and url.startswith("http"):
-                    primary_url = url
-                    break
+        # Save per-source timeline evidence (pre-dedup)
+        key = nv.cve_id or nv.ghsa_id or nv.osv_id or nv.primary_key_id
+        for src_nv in source_evidence.get(key, [nv]):
+            primary_url = ""
+            if src_nv.references:
+                for ref in src_nv.references:
+                    url = ref.get("url", "")
+                    if url and url.startswith("http"):
+                        primary_url = url
+                        break
 
-        repo.save_source_record(session, SourceRecord(
-            vulnerability_id=saved.id,
-            source=nv.source,
-            source_id=nv.primary_key_id,
-            source_type="api",
-            raw_json=nv.raw_json,
-            published_at=nv.published_at,
-            modified_at=nv.modified_at,
-            title=nv.title[:300] if nv.title else "",
-            url=primary_url,
-            fetched_at=_utcnow(),
-        ))
+            repo.save_source_record(session, SourceRecord(
+                vulnerability_id=saved.id,
+                source=src_nv.source,
+                source_id=src_nv.primary_key_id,
+                source_type="api",
+                raw_json=src_nv.raw_json,
+                published_at=src_nv.published_at,
+                modified_at=src_nv.modified_at,
+                title=src_nv.title[:300] if src_nv.title else "",
+                url=primary_url,
+                fetched_at=_utcnow(),
+            ))
 
         # Save affected products (dedup by vendor+product+pkg)
         if nv.affected_products:
