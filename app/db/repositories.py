@@ -153,35 +153,34 @@ def get_vulnerabilities(
     )
 
     if sort == "smart":
-        # Smart: composite score + recency
-        now = datetime.utcnow()
-        d1 = now - timedelta(days=1)
-        d3 = now - timedelta(days=3)
-        d7 = now - timedelta(days=7)
-        d30 = now - timedelta(days=30)
+        # ── Smart: action_value_score + exponential recency decay + KEV boost ──
+        #
+        # Base:        action_value_score  (0-100)  — composite risk score
+        # Recency:     max(0, 20 * (1 - age_hours / 168))  — linear decay over 7 days
+        #   - 0h old:  +20   1h: +19.9   24h: +17.1   72h: +11.4   168h+: 0
+        # KEV:         +5 if CISA KEV  — known exploitation demands immediate attention
+        # Ignored:     -10000  — always last
+        age_hours = (sa_func.julianday("now") - sa_func.julianday(
+            sa_func.coalesce(
+                Vulnerability.disclosed_at,
+                Vulnerability.published_at,
+                Vulnerability.first_seen_at,
+            )
+        )) * 24.0
 
-        recency_bonus = case(
-            (effective_date >= d1, 50),
-            (effective_date >= d3, 35),
-            (effective_date >= d7, 20),
-            (effective_date >= d30, 8),
+        recency_decay = case(
+            (age_hours < 168, 20.0 * (1.0 - age_hours / 168.0)),
             else_=0,
         )
-        severity_group = case(
-            (Vulnerability.cvss_score >= 9.0, 3),
-            (Vulnerability.cvss_score >= 7.0, 3),
-            (Vulnerability.cvss_score >= 4.0, 2),
-            else_=1,
+        kev_bonus = case(
+            (Vulnerability.is_kev == True, 5),  # noqa: E712
+            else_=0,
         )
-        high_risk_recency = case(
-            (Vulnerability.cvss_score >= 7.0, recency_bonus * 2),
-            (Vulnerability.cvss_score >= 4.0, recency_bonus),
-            else_=recency_bonus / 2,
-        )
+
         smart_score = (
-            Vulnerability.action_value_score * 2
-            + high_risk_recency
-            + severity_group * 10
+            Vulnerability.action_value_score
+            + recency_decay
+            + kev_bonus
             + ignored_penalty
         )
         order = smart_score.desc()
