@@ -1,4 +1,4 @@
-"""Rcon AI Panel — immersive landing page and chat for vulnerability intelligence."""
+"""Rcon AI Panel — pixel-hacker terminal workspace for vulnerability intelligence."""
 
 import json
 import re
@@ -18,29 +18,48 @@ from app.services.agent_service import AgentService
 from app.services.agent_worker import AgentWorker
 from app.ui.fonts import pixel_font, mono_font, text_font
 
-CENTER_MAX_WIDTH = 1040
-COMPOSER_MAX_WIDTH = 980
+CENTER_MAX_WIDTH = 1320
+COMPOSER_MAX_WIDTH = 1180
 
 AGENT_STYLE = """
 QWidget#agentPanel {
-    background: #050805;
-    color: #c9ffd1;
+    background: qlineargradient(
+        x1:0, y1:0, x2:0, y2:1,
+        stop:0 #050805, stop:0.55 #040704, stop:1 #071007
+    );
+    color: #d6ffd6;
 }
 
 QFrame#agentTopBar {
-    background: #070b07;
-    border-bottom: 1px solid #143d1f;
+    background: qlineargradient(
+        x1:0, y1:0, x2:1, y2:0,
+        stop:0 #050805, stop:0.55 #071007, stop:1 #050805
+    );
+    border-bottom: 1px solid #123818;
 }
 
 QLabel#agentTitle {
-    color: #b7ffb7;
+    color: #d6ffd6;
     font-size: 15px;
     font-weight: 700;
 }
 
 QLabel#agentSubtitle {
-    color: #6da87a;
-    font-size: 12px;
+    color: #7edb8d;
+    font-size: 11px;
+}
+
+QPushButton#newChatBtn {
+    background: #071007;
+    color: #39ff14;
+    border: 1px solid #1ed760;
+    border-radius: 4px;
+    padding: 7px 18px;
+}
+
+QPushButton#newChatBtn:hover {
+    background: #0b160b;
+    border: 1px solid #39ff14;
 }
 
 QWidget#agentPanel QFrame#assistantBubble {
@@ -71,114 +90,30 @@ QWidget#agentPanel QLabel#assistantAvatar {
 
 QWidget#agentPanel QTextBrowser#messageBody {
     background: transparent;
-    color: #cfe9d2;
-    border: none;
-    font-size: 14px;
-}
-
-QWidget#agentPanel QFrame#composerWrap {
-    background: #050805;
-    border-top: 1px solid #102610;
-}
-
-QWidget#agentPanel QFrame#composerShell {
-    background: #081008;
-    border: 1px solid #1b5e20;
-    border-radius: 4px;
-}
-
-QWidget#agentPanel QFrame#composerShell[focused="true"] {
-    background: #0a120a;
-    border: 1px solid #39ff14;
-}
-
-QWidget#agentPanel QTextEdit#composerInput {
-    background: transparent;
     color: #d6ffd6;
     border: none;
-    font-size: 13px;
-    padding: 2px;
-}
-
-QWidget#agentPanel QPushButton#sendCircle {
-    background: #0d180d;
-    color: #39ff14;
-    border: 1px solid #1ed760;
-    border-radius: 4px;
     font-size: 14px;
-    font-weight: 900;
 }
 
-QWidget#agentPanel QPushButton#sendCircle:hover {
-    background: #102010;
-    border: 1px solid #39ff14;
-}
-
-QWidget#agentPanel QPushButton#newBtn {
-    background: #0d180d;
-    color: #39ff14;
-    border: 1px solid #1ed760;
-    border-radius: 4px;
-    padding: 5px 16px;
-    font-size: 12px;
-}
-
-QWidget#agentPanel QPushButton#newBtn:hover {
-    background: #102010;
-    border: 1px solid #39ff14;
-}
-
-QWidget#agentPanel QPushButton#linkBtn {
+QFrame#dashboardShell {
     background: transparent;
-    color: #39ff14;
-    border: none;
-    font-size: 12px;
 }
-
-QWidget#agentPanel QPushButton#linkBtn:hover { color: #b7ffb7; }
-
-QWidget#agentPanel QFrame#chipFrame {
-    background: #050805;
-    border-top: 1px solid #102610;
-}
-
-QWidget#agentPanel QPushButton#chipBtn {
-    background: #0d180d;
-    color: #6fa57a;
-    border: 1px solid #1b5e20;
-    border-radius: 4px;
-    padding: 7px 16px;
-    font-size: 12px;
-}
-
-QWidget#agentPanel QPushButton#chipBtn:hover {
-    background: #102010;
-    color: #c9ffd1;
-    border: 1px solid #39ff14;
-}
-
-QWidget#agentPanel QScrollArea { background: #050805; border: none; }
-QWidget#agentPanel QScrollBar:vertical {
-    background: #050805; width: 5px; border: none;
-}
-QWidget#agentPanel QScrollBar::handle:vertical {
-    background: #1b5e20; border-radius: 2px; min-height: 30px;
-}
-QWidget#agentPanel QScrollBar::handle:vertical:hover { background: #39ff14; }
-QWidget#agentPanel QScrollBar::add-line:vertical, QWidget#agentPanel QScrollBar::sub-line:vertical { height: 0; }
 
 QFrame#heroCard {
-    background: #081008;
+    background: qlineargradient(
+        x1:0, y1:0, x2:1, y2:1,
+        stop:0 #071007, stop:0.55 #081008, stop:1 #0c160c
+    );
     border: 1px solid #1b5e20;
     border-radius: 6px;
 }
 
 QLabel#heroTitle {
-    color: #b7ffb7;
+    color: #d6ffd6;
 }
 
 QLabel#heroSubtitle {
-    color: #7edb8d;
+    color: #9cd8a7;
 }
 
 QLabel#heroPrompt {
@@ -186,47 +121,63 @@ QLabel#heroPrompt {
 }
 
 QLabel#sectionTitle {
-    color: #6fa57a;
-    font-size: 13px;
+    color: #39ff14;
+    font-size: 12px;
     font-weight: 600;
 }
 
-QFrame#metricPill {
-    background: #081008;
-    border: 1px solid #143d1f;
+QPushButton#linkBtn {
+    background: transparent;
+    color: #7dff7d;
+    border: 1px solid #16521f;
+    border-radius: 3px;
+    padding: 4px 10px;
+}
+
+QPushButton#linkBtn:hover {
+    color: #39ff14;
+    border: 1px solid #39ff14;
+}
+
+QFrame#metricPill,
+QFrame#promptCard,
+QFrame#riskFeedCard {
+    background: qlineargradient(
+        x1:0, y1:0, x2:1, y2:1,
+        stop:0 #071007, stop:0.55 #081008, stop:1 #0c160c
+    );
+    border: 1px solid #16521f;
     border-radius: 4px;
+}
+
+QFrame#promptCard:hover,
+QFrame#riskFeedCard:hover {
+    background: qlineargradient(
+        x1:0, y1:0, x2:1, y2:1,
+        stop:0 #0a140a, stop:0.6 #0c180c, stop:1 #0f1b0f
+    );
+    border: 1px solid #39ff14;
 }
 
 QLabel#metricValue {
     color: #39ff14;
-    font-size: 22px;
+    font-size: 20px;
     font-weight: 900;
 }
 
 QLabel#metricLabel {
-    color: #79b88a;
+    color: #78b985;
     font-size: 11px;
 }
 
-QFrame#promptCard {
-    background: #081008;
-    border: 1px solid #143d1f;
-    border-radius: 4px;
-}
-
-QFrame#promptCard:hover {
-    background: #0a120a;
-    border: 1px solid #39ff14;
-}
-
 QLabel#promptTitle {
-    color: #c9ffd1;
+    color: #d6ffd6;
     font-size: 13px;
     font-weight: 700;
 }
 
 QLabel#promptDesc {
-    color: #75b884;
+    color: #8dcf98;
     font-size: 12px;
 }
 
@@ -239,20 +190,9 @@ QLabel#promptBadge {
     font-size: 10px;
 }
 
-QFrame#riskFeedCard {
-    background: #081008;
-    border: 1px solid #143d1f;
-    border-radius: 4px;
-}
-
-QFrame#riskFeedCard:hover {
-    background: #0a120a;
-    border: 1px solid #39ff14;
-}
-
 QLabel#riskCve {
-    color: #6cff6c;
-    font-size: 12px;
+    color: #7dff7d;
+    font-size: 11px;
     font-weight: 800;
 }
 
@@ -274,15 +214,102 @@ QLabel#riskScore {
     font-size: 18px;
     font-weight: 900;
 }
+
+QFrame#chipWrap {
+    background: qlineargradient(
+        x1:0, y1:0, x2:0, y2:1,
+        stop:0 #050805, stop:1 #061006
+    );
+    border-top: 1px solid #102610;
+}
+
+QFrame#chipInner {
+    background: transparent;
+}
+
+QPushButton#chipBtn {
+    background: #071007;
+    color: #8dcf98;
+    border: 1px solid #16521f;
+    border-radius: 4px;
+    padding: 7px 16px;
+}
+
+QPushButton#chipBtn:hover {
+    color: #39ff14;
+    background: #0a140a;
+    border: 1px solid #39ff14;
+}
+
+QFrame#composerWrap {
+    background: qlineargradient(
+        x1:0, y1:0, x2:0, y2:1,
+        stop:0 #050805, stop:1 #071007
+    );
+    border-top: 1px solid #102610;
+}
+
+QFrame#composerShell {
+    background: qlineargradient(
+        x1:0, y1:0, x2:1, y2:1,
+        stop:0 #071007, stop:0.65 #081008, stop:1 #0d180d
+    );
+    border: 1px solid #1b5e20;
+    border-radius: 4px;
+}
+
+QFrame#composerShell[focused="true"] {
+    background: #0a120a;
+    border: 1px solid #39ff14;
+}
+
+QTextEdit#composerInput {
+    background: transparent;
+    color: #d6ffd6;
+    border: none;
+    font-size: 13px;
+    padding: 2px;
+}
+
+QPushButton#sendCircle {
+    background: #0d180d;
+    color: #39ff14;
+    border: 1px solid #1ed760;
+    border-radius: 4px;
+    font-size: 14px;
+    font-weight: 900;
+}
+
+QPushButton#sendCircle:hover {
+    background: #102010;
+    border: 1px solid #39ff14;
+}
+
+QScrollBar:vertical {
+    background: #050805;
+    width: 8px;
+}
+
+QScrollBar::handle:vertical {
+    background: #1ed760;
+    border-radius: 3px;
+    min-height: 36px;
+}
+
+QScrollBar::add-line:vertical,
+QScrollBar::sub-line:vertical {
+    height: 0px;
+}
 """
 
 
 # ─── Metric Pill ──────────────────────────────────────────────────────
 class MetricPill(QFrame):
-    def __init__(self, label: str, value: str, accent: str, parent=None):
+    def __init__(self, label: str, value: str, accent: str = "#39ff14", parent=None):
         super().__init__(parent)
         self.setObjectName("metricPill")
-        self.setMinimumHeight(76)
+        self.setMinimumHeight(78)
+        self.setMaximumHeight(92)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
 
         layout = QVBoxLayout(self)
@@ -291,8 +318,8 @@ class MetricPill(QFrame):
 
         self.value_label = QLabel(str(value))
         self.value_label.setObjectName("metricValue")
-        self.value_label.setStyleSheet(f"color: {accent};")
         self.value_label.setFont(pixel_font(16, bold=True))
+        self.value_label.setStyleSheet(f"color: {accent};")
         layout.addWidget(self.value_label)
 
         lbl = QLabel(label)
@@ -313,24 +340,27 @@ class PromptCard(QFrame):
         self.prompt = prompt
         self.setObjectName("promptCard")
         self.setCursor(Qt.PointingHandCursor)
-        self.setMinimumHeight(112)
+        self.setMinimumHeight(96)
+        self.setMaximumHeight(112)
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(18, 16, 18, 16)
+        layout.setContentsMargins(18, 14, 18, 14)
         layout.setSpacing(8)
 
         header = QHBoxLayout()
+        header.setSpacing(8)
         head = QLabel(title)
         head.setObjectName("promptTitle")
         head.setFont(pixel_font(10, bold=True))
         header.addWidget(head)
-        header.addStretch()
+        header.addStretch(1)
 
         if badge:
             badge_label = QLabel(badge)
             badge_label.setObjectName("promptBadge")
             badge_label.setAlignment(Qt.AlignCenter)
-            badge_label.setFixedSize(42, 22)
+            badge_label.setFixedHeight(22)
+            badge_label.setMinimumWidth(42)
             badge_label.setFont(pixel_font(8, bold=True))
             header.addWidget(badge_label)
 
@@ -341,7 +371,6 @@ class PromptCard(QFrame):
         body.setFont(mono_font(10))
         body.setWordWrap(True)
         layout.addWidget(body)
-
         layout.addStretch(1)
 
     def mousePressEvent(self, event):
@@ -357,25 +386,26 @@ class RiskFeedCard(QFrame):
         self._data = data
         self.setObjectName("riskFeedCard")
         self.setCursor(Qt.PointingHandCursor)
-        self.setMinimumHeight(86)
+        self.setMinimumHeight(78)
+        self.setMaximumHeight(92)
 
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(16, 14, 16, 14)
-        layout.setSpacing(14)
+        layout.setContentsMargins(14, 12, 14, 12)
+        layout.setSpacing(12)
 
         left = QVBoxLayout()
-        left.setSpacing(6)
+        left.setSpacing(4)
 
         cve = QLabel(data.get("cve_id", "N/A"))
         cve.setObjectName("riskCve")
-        cve.setFont(pixel_font(10, bold=True))
+        cve.setFont(pixel_font(9, bold=True))
         left.addWidget(cve)
 
         title = QLabel(data.get("title", ""))
         title.setObjectName("riskTitle")
         title.setFont(mono_font(10))
         title.setWordWrap(True)
-        title.setMaximumHeight(38)
+        title.setMaximumHeight(34)
         left.addWidget(title)
 
         meta = QLabel(self._meta_text(data))
@@ -389,7 +419,7 @@ class RiskFeedCard(QFrame):
         badge = QLabel(f"{score:03d}")
         badge.setObjectName("riskScore")
         badge.setAlignment(Qt.AlignCenter)
-        badge.setFixedSize(52, 52)
+        badge.setFixedSize(50, 50)
         badge.setFont(pixel_font(12, bold=True))
         layout.addWidget(badge)
 
@@ -404,7 +434,7 @@ class RiskFeedCard(QFrame):
         sev = data.get("severity")
         if sev:
             parts.append(str(sev).upper())
-        return " · ".join(parts) or "暂无结构化风险标签"
+        return " · ".join(parts) or "NO_TAGS"
 
     def mousePressEvent(self, event):
         self.clicked.emit(self._data)
@@ -446,23 +476,28 @@ class AgentPanel(QWidget):
         # ── Top Bar ────────────────────────────────────────────────
         top = QFrame()
         top.setObjectName("agentTopBar")
-        top.setFixedHeight(48)
+        top.setFixedHeight(52)
         tb = QHBoxLayout(top)
         tb.setContentsMargins(24, 0, 16, 0)
 
-        title = QLabel("Rcon AI")
+        title_block = QVBoxLayout()
+        title_block.setSpacing(2)
+
+        title = QLabel("RCON_AI")
         title.setObjectName("agentTitle")
-        title.setFont(pixel_font(12, bold=True))
-        tb.addWidget(title)
-        tb.addSpacing(10)
-        subtitle = QLabel("local vuln intel assistant")
-        subtitle.setObjectName("agentSubtitle")
-        subtitle.setFont(mono_font(9))
-        tb.addWidget(subtitle)
+        title.setFont(pixel_font(14, bold=True))
+        title_block.addWidget(title)
+
+        sub = QLabel("local vuln intel assistant")
+        sub.setObjectName("agentSubtitle")
+        sub.setFont(mono_font(10))
+        title_block.addWidget(sub)
+
+        tb.addLayout(title_block)
         tb.addStretch()
 
         self.btn_new = QPushButton("+ NEW")
-        self.btn_new.setObjectName("newBtn")
+        self.btn_new.setObjectName("newChatBtn")
         self.btn_new.setCursor(Qt.PointingHandCursor)
         self.btn_new.setFont(pixel_font(9, bold=True))
         self.btn_new.clicked.connect(self._clear)
@@ -476,17 +511,14 @@ class AgentPanel(QWidget):
         self.content_layout.setContentsMargins(0, 0, 0, 0)
         self.content_layout.setSpacing(0)
 
-        # Dashboard view
         self.dashboard = self._build_dashboard()
         self.content_layout.addWidget(self.dashboard)
 
-        # Chat view (hidden initially)
         self.chat_scroll = QScrollArea()
         self.chat_scroll.setWidgetResizable(True)
         self.chat_scroll.setFrameShape(QFrame.NoFrame)
         self.chat_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.chat_container = QWidget()
-        self.chat_container.setObjectName("chatPage")
         self.chat_layout = QVBoxLayout(self.chat_container)
         self.chat_layout.setContentsMargins(0, 36, 0, 36)
         self.chat_layout.setSpacing(8)
@@ -497,36 +529,51 @@ class AgentPanel(QWidget):
 
         root.addWidget(self.content_stack, 1)
 
-        # ── Quick Actions Chips ────────────────────────────────────
-        self.chip_frame = QFrame()
-        self.chip_frame.setObjectName("chipFrame")
-        chip_l = QHBoxLayout(self.chip_frame)
-        chip_l.setContentsMargins(20, 10, 20, 6)
+        # ── Chip Area (self-contained width) ───────────────────────
+        chip_wrap = QFrame()
+        chip_wrap.setObjectName("chipWrap")
+        outer = QHBoxLayout(chip_wrap)
+        outer.setContentsMargins(20, 8, 20, 8)
+        outer.setSpacing(0)
+
+        chip_inner = QFrame()
+        chip_inner.setObjectName("chipInner")
+        chip_inner.setMaximumWidth(COMPOSER_MAX_WIDTH)
+
+        chip_l = QHBoxLayout(chip_inner)
+        chip_l.setContentsMargins(0, 0, 0, 0)
         chip_l.setSpacing(10)
 
-        for label, icon in [("数据库概览", "📊"), ("最近漏洞", "🕐"), ("高危 Top10", "🔥")]:
-            btn = QPushButton(f"{icon}  {label}")
+        for text, label in [("▣", "数据库概览"), ("◉", "最近漏洞"), ("▲", "高危 Top10")]:
+            btn = QPushButton(f"{text}  {label}")
             btn.setObjectName("chipBtn")
             btn.setCursor(Qt.PointingHandCursor)
+            btn.setFont(mono_font(10))
             btn.clicked.connect(lambda _, l=label: self._on_chip(l))
             chip_l.addWidget(btn)
-        chip_l.addStretch()
+        chip_l.addStretch(1)
+
+        outer.addStretch(1)
+        outer.addWidget(chip_inner, 1)
+        outer.addStretch(1)
+
+        self.chip_frame = chip_wrap
         root.addWidget(self.chip_frame)
 
-        # ── Composer (centered max-width) ──────────────────────────
+        # ── Composer (wider, terminal style) ───────────────────────
         composer_wrap = QFrame()
         composer_wrap.setObjectName("composerWrap")
         wrap_l = QHBoxLayout(composer_wrap)
-        wrap_l.setContentsMargins(32, 10, 32, 18)
+        wrap_l.setContentsMargins(20, 10, 20, 18)
         wrap_l.setSpacing(0)
 
         self.composer = ChatComposer()
         self.composer.setMaximumWidth(COMPOSER_MAX_WIDTH)
         self.composer.submitted.connect(self._send)
-        self.composer.input.setPlaceholderText("> query CVE / KEV / EPSS or generate fix priority list...")
+        self.composer.input.setPlaceholderText("> query CVE / KEV / EPSS or generate fix priority...")
         self.composer.input.setFont(mono_font(11))
         self.composer.send_btn.setText(">>")
-        self.composer.send_btn.setFixedSize(44, 34)
+        self.composer.send_btn.setFixedSize(46, 34)
         self.composer.send_btn.setFont(pixel_font(10, bold=True))
 
         wrap_l.addStretch(1)
@@ -534,6 +581,34 @@ class AgentPanel(QWidget):
         wrap_l.addStretch(1)
 
         root.addWidget(composer_wrap)
+
+    def _build_hero_card(self):
+        hero = QFrame()
+        hero.setObjectName("heroCard")
+        hero.setMinimumHeight(140)
+        hero.setMaximumHeight(160)
+
+        layout = QVBoxLayout(hero)
+        layout.setContentsMargins(28, 24, 28, 24)
+        layout.setSpacing(9)
+
+        title = QLabel("RCON_AI")
+        title.setObjectName("heroTitle")
+        title.setFont(pixel_font(22, bold=True))
+        layout.addWidget(title)
+
+        sub = QLabel("LOCAL VULN INTEL ASSISTANT")
+        sub.setObjectName("heroSubtitle")
+        sub.setFont(mono_font(11))
+        layout.addWidget(sub)
+
+        prompt = QLabel("> query CVE / KEV / EPSS / PATCH_PRIORITY")
+        prompt.setObjectName("heroPrompt")
+        prompt.setFont(mono_font(11, bold=True))
+        layout.addWidget(prompt)
+
+        layout.addStretch(1)
+        return hero
 
     def _build_dashboard(self):
         scroll = QScrollArea()
@@ -543,62 +618,42 @@ class AgentPanel(QWidget):
 
         page = QWidget()
         page_layout = QHBoxLayout(page)
-        page_layout.setContentsMargins(32, 32, 32, 28)
+        page_layout.setContentsMargins(20, 28, 20, 24)
         page_layout.setSpacing(0)
 
         shell = QFrame()
         shell.setObjectName("dashboardShell")
         shell.setMaximumWidth(CENTER_MAX_WIDTH)
 
-        layout = QVBoxLayout(shell)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(22)
+        shell_layout = QVBoxLayout(shell)
+        shell_layout.setContentsMargins(0, 0, 0, 0)
+        shell_layout.setSpacing(16)
 
-        # ── Hero ────────────────────────────────────────────────────
-        hero = QFrame()
-        hero.setObjectName("heroCard")
-        hero_l = QVBoxLayout(hero)
-        hero_l.setContentsMargins(28, 28, 28, 28)
-        hero_l.setSpacing(10)
+        main_row = QHBoxLayout()
+        main_row.setSpacing(18)
 
-        hero_title = QLabel("RCON_AI")
-        hero_title.setObjectName("heroTitle")
-        hero_title.setFont(pixel_font(22, bold=True))
-        hero_l.addWidget(hero_title)
+        # ── Left Column (7/12) ──────────────────────────────────────
+        left_col = QVBoxLayout()
+        left_col.setSpacing(14)
 
-        hero_sub = QLabel("LOCAL VULN INTEL ASSISTANT")
-        hero_sub.setObjectName("heroSubtitle")
-        hero_sub.setFont(pixel_font(9))
-        hero_sub.setWordWrap(True)
-        hero_l.addWidget(hero_sub)
+        hero = self._build_hero_card()
+        left_col.addWidget(hero)
 
-        hero_prompt = QLabel("> query CVE / KEV / EPSS / PATCH_PRIORITY")
-        hero_prompt.setObjectName("heroPrompt")
-        hero_prompt.setFont(mono_font(10))
-        hero_l.addWidget(hero_prompt)
-
-        layout.addWidget(hero)
-
-        # ── Metrics ─────────────────────────────────────────────────
         metrics = QHBoxLayout()
-        metrics.setSpacing(12)
-
-        self.card_total = MetricPill("总漏洞", "—", "#93c5fd")
-        self.card_kev = MetricPill("KEV 命中", "—", "#fca5a5")
-        self.card_unread = MetricPill("未读", "—", "#fcd34d")
-        self.card_high = MetricPill("高危 ≥80", "—", "#f87171")
-
+        metrics.setSpacing(10)
+        self.card_total = MetricPill("总漏洞", "—", "#39ff14")
+        self.card_kev = MetricPill("KEV 命中", "—", "#39ff14")
+        self.card_unread = MetricPill("未读", "—", "#39ff14")
+        self.card_high = MetricPill("高危 ≥80", "—", "#39ff14")
         for card in [self.card_total, self.card_kev, self.card_unread, self.card_high]:
             metrics.addWidget(card)
+        left_col.addLayout(metrics)
 
-        layout.addLayout(metrics)
-
-        # ── Prompt Cards ────────────────────────────────────────────
         prompt_grid = QGridLayout()
         prompt_grid.setSpacing(12)
 
         prompts = [
-            ("今日优先处置", "让 Rcon 汇总当前最值得优先修复的风险。",
+            ("今日优先处置", "汇总当前最值得优先修复的风险。",
              "根据本地漏洞数据库，总结当前最值得优先处置的漏洞，并说明排序原因。", "P1"),
             ("KEV 命中分析", "查看存在在野利用证据的关键漏洞。",
              "高危 Top10", "KEV"),
@@ -613,28 +668,37 @@ class AgentPanel(QWidget):
             card.clicked.connect(self._send_prompt)
             prompt_grid.addWidget(card, i // 2, i % 2)
 
-        layout.addLayout(prompt_grid)
+        left_col.addLayout(prompt_grid)
+        left_col.addStretch(1)
 
-        # ── Recent Risk Feed ────────────────────────────────────────
-        header = QHBoxLayout()
-        label = QLabel("最近风险动态")
-        label.setObjectName("sectionTitle")
-        header.addWidget(label)
-        header.addStretch()
+        # ── Right Column (5/12) ─────────────────────────────────────
+        right_col = QVBoxLayout()
+        right_col.setSpacing(12)
 
-        self.btn_more = QPushButton("查看全部 →")
+        right_header = QHBoxLayout()
+        feed_title = QLabel("RECENT_RISK_FEED")
+        feed_title.setObjectName("sectionTitle")
+        feed_title.setFont(pixel_font(11, bold=True))
+        right_header.addWidget(feed_title)
+        right_header.addStretch()
+
+        self.btn_more = QPushButton("VIEW_ALL")
         self.btn_more.setObjectName("linkBtn")
-        self.btn_more.setCursor(Qt.PointingHandCursor)
+        self.btn_more.setFont(pixel_font(9, bold=True))
         self.btn_more.clicked.connect(lambda: self._on_chip("最近漏洞"))
-        header.addWidget(self.btn_more)
+        right_header.addWidget(self.btn_more)
 
-        layout.addLayout(header)
+        right_col.addLayout(right_header)
 
         self.vuln_list = QVBoxLayout()
         self.vuln_list.setSpacing(8)
-        layout.addLayout(self.vuln_list)
+        right_col.addLayout(self.vuln_list)
+        right_col.addStretch(1)
 
-        layout.addStretch(1)
+        main_row.addLayout(left_col, 7)
+        main_row.addLayout(right_col, 5)
+
+        shell_layout.addLayout(main_row)
 
         page_layout.addStretch(1)
         page_layout.addWidget(shell, 1)
@@ -669,7 +733,7 @@ class AgentPanel(QWidget):
                 empty.setStyleSheet("color:#3d4450; font-size:13px; padding:16px;")
                 self.vuln_list.addWidget(empty)
             else:
-                for v in vulns[:5]:
+                for v in vulns[:6]:
                     card = RiskFeedCard(v)
                     card.clicked.connect(lambda d=v: self._on_vuln_click(d))
                     self.vuln_list.addWidget(card)
@@ -766,35 +830,26 @@ class AgentPanel(QWidget):
         normalized = message.strip()
         if not normalized:
             return None
-
         cve_match = re.search(r"\bCVE[-\s]?(\d{4})[-\s]?(\d{4,})\b", normalized, re.I)
         if cve_match:
             cve_id = f"CVE-{cve_match.group(1)}-{cve_match.group(2)}"
             result = self.tools.cve(cve_id)
             return result if result else f"未在本地数据库中找到 {cve_id}。"
-
         first_sentence = re.split(r"[。！？\n]", normalized, maxsplit=1)[0]
         short_query = len(normalized) <= 24
         no_context = len(self._history) <= 1
-
+        allow_tool = short_query or no_context
         def starts_with_any(words):
             return any(first_sentence.startswith(w) for w in words)
-
-        allow_tool = short_query or no_context
-
         if allow_tool and starts_with_any(["统计", "概览", "数据库概览", "当前统计"]):
             return self.tools.stats()
-
         if allow_tool and starts_with_any(["最近", "最新", "新漏洞", "最近漏洞"]):
             return self.tools.recent()
-
         if allow_tool and starts_with_any(["高危", "严重", "Top", "TOP", "优先处置"]):
             return self.tools.top_risk()
-
         search_match = re.match(r"^(搜索|查找|查询)\s+(.+)$", normalized, re.I)
         if search_match and len(search_match.group(2).strip()) >= 2:
             return self.tools.search(search_match.group(2).strip())
-
         return None
 
     def _emit_tool_result(self, result):
@@ -810,14 +865,11 @@ class AgentPanel(QWidget):
         if not cfg or not getattr(cfg, "api_key", ""):
             self._stream_assistant("[!] 未配置 API Key，请在设置 → Agent 配置中设置。")
             return
-
         self._busy = True
         self._request_id += 1
         request_id = self._request_id
-
         self.composer.set_generating(True)
         thinking = self._append_assistant("正在思考…")
-
         self._worker = AgentWorker(self.agent_service, self._history[-10:])
         self._worker.response_ready.connect(
             lambda text, rid=request_id: self._on_ai_ok(rid, thinking, text)
@@ -851,7 +903,6 @@ class AgentPanel(QWidget):
         if self._current_stream:
             self._current_stream.cancel()
             self._current_stream = None
-
         while self.chat_layout.count() > 1:
             item = self.chat_layout.takeAt(0)
             if item.widget():
