@@ -461,9 +461,8 @@ def main():
         update_badge()
         if hasattr(main_window, "agent_panel"):
             main_window.agent_panel.refresh_dashboard()
-        ai_push_manager.on_sync_done()
 
-        # Pending config wins over duplicate sync request
+        # Pending config wins first
         cfg = _pending_config[0]
         if cfg is not None:
             _pending_config[0] = None
@@ -471,7 +470,9 @@ def main():
             on_config_changed(cfg)
             return
 
-        # Coalesce duplicate sync into one extra run
+        # AI push generation based on latest config
+        ai_push_manager.on_sync_done()
+
         if sync_pending[0]:
             sync_pending[0] = False
             QTimer.singleShot(500, sync_func)
@@ -571,6 +572,7 @@ def main():
     )
     main_window.ai_push_manager = ai_push_manager
     ai_push_manager.alert_count_changed.connect(floating_ball.set_ai_alert_count)
+    QTimer.singleShot(0, ai_push_manager.refresh_alert_count)
 
     def _open_ai_push():
         try:

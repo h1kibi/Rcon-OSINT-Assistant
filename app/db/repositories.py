@@ -638,13 +638,24 @@ def count_unalerted_high_risk_candidates(
 def add_personal_library_report_entry(
     session: Session, report_id: int, title: str
 ):
-    session.add(PersonalLibraryEntry(
-        entry_type="ai_push_report",
-        report_id=report_id,
-        title=title,
-        created_at=_utcnow(),
-        updated_at=_utcnow(),
-    ))
+    existing = session.exec(
+        select(PersonalLibraryEntry).where(
+            PersonalLibraryEntry.entry_type == "ai_push_report",
+            PersonalLibraryEntry.report_id == report_id,
+        )
+    ).first()
+    if existing:
+        existing.title = title or existing.title
+        existing.updated_at = _utcnow()
+        session.add(existing)
+    else:
+        session.add(PersonalLibraryEntry(
+            entry_type="ai_push_report",
+            report_id=report_id,
+            title=title,
+            created_at=_utcnow(),
+            updated_at=_utcnow(),
+        ))
     session.commit()
 
 

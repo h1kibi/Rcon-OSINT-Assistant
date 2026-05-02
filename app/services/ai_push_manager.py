@@ -38,13 +38,20 @@ class AIPushManager(QObject):
         return self._status
 
     def is_generating(self):
-        return self._status in {"queued", "generating_rule", "generating_ai"}
+        return self._status in {"generating_rule", "generating_ai"}
 
     def start_on_boot(self):
         self._startup_pending = True
-        self._status = "queued"
+        self._status = "waiting_sync"
         self.generation_started.emit()
         self.request_sync()
+
+    def refresh_alert_count(self):
+        session = self.session_factory()
+        try:
+            self._emit_alert_count(session)
+        finally:
+            session.close()
 
     def on_sync_done(self):
         if self.is_generating():
@@ -67,7 +74,7 @@ class AIPushManager(QObject):
                 session.close()
 
         if triggered:
-            self._start_generation("hourly" if not self._startup_pending else "startup")
+            self._start_generation("startup" if self._startup_pending else "hourly")
 
     def _start_generation(self, trigger_type: str):
         self._startup_pending = False
@@ -81,12 +88,19 @@ class AIPushManager(QObject):
             items = [build_vuln_push_payload(session, v) for v in candidates]
 
             if not items:
-                report.status = "ready_rule"
-                report.final_content = "# AI推送\n暂无符合条件的高危漏洞。"
-                session.add(report)
-                session.commit()
+                rule_md = "# AI推送\n\n暂无符合条件的高危漏洞。"
+                content_hash = hashlib.sha256(rule_md.encode("utf-8")).hexdigest()
+                repo.save_ai_push_report_ready(
+                    session, report.id, rule_content=rule_md, ai_content="",
+                    final_content=rule_md, prompt="", context_json="[]",
+                    content_hash=content_hash, model="rule-based",
+                    candidate_count=0, high_risk_count=0,
+                    new_high_risk_count=0, status="ready_rule",
+                )
+                repo.add_personal_library_report_entry(session, report.id, "AI推送：暂无高危漏洞")
                 self._status = "idle"
                 self.report_ready.emit(report.id)
+                self._emit_alert_count(session)
                 return
 
             rule_md = build_rule_based_push(items)
@@ -102,12 +116,10 @@ class AIPushManager(QObject):
 
             if not has_ai:
                 repo.save_ai_push_report_ready(
-                    session, report.id,
-                    rule_content=rule_md, ai_content="",
-                    final_content=rule_md, prompt=prompt,
-                    context_json=context_json, content_hash=content_hash,
-                    model="rule-based", candidate_count=len(items),
-                    high_risk_count=len(items),
+                    session, report.id, rule_content=rule_md, ai_content="",
+                    final_content=rule_md, prompt=prompt, context_json=context_json,
+                    content_hash=content_hash, model="rule-based",
+                    candidate_count=len(items), high_risk_count=len(items),
                     new_high_risk_count=new_count, status="ready_rule",
                 )
                 repo.add_personal_library_report_entry(session, report.id, report.title)
@@ -117,10 +129,7 @@ class AIPushManager(QObject):
                 return
 
             self._status = "generating_ai"
-            self._start_worker(
-                report.id, agent_cfg, prompt, rule_md,
-                context_json, items, new_count,
-            )
+            self._start_worker(report.id, agent_cfg, prompt, rule_md, context_json, items, new_count)
         except Exception as e:
             logger.exception("AI push generation failed")
             self._status = "idle"
@@ -145,12 +154,10 @@ class AIPushManager(QObject):
             cfg = self.get_config()
             model = getattr(cfg.agent, "model", "unknown") if hasattr(cfg, "agent") else "unknown"
             repo.save_ai_push_report_ready(
-                session, report_id,
-                rule_content=rule_md, ai_content=text,
-                final_content=text, prompt=prompt,
-                context_json=context_json, content_hash=content_hash,
-                model=model, candidate_count=len(items),
-                high_risk_count=len(items),
+                session, report_id, rule_content=rule_md, ai_content=text,
+                final_content=text, prompt=prompt, context_json=context_json,
+                content_hash=content_hash, model=model,
+                candidate_count=len(items), high_risk_count=len(items),
                 new_high_risk_count=new_count, status="ready_ai",
             )
             repo.add_personal_library_report_entry(session, report_id, "AI推送：最新高危漏洞简报")
@@ -165,12 +172,10 @@ class AIPushManager(QObject):
         try:
             content_hash = hashlib.sha256(rule_md.encode("utf-8")).hexdigest()
             repo.save_ai_push_report_ready(
-                session, report_id,
-                rule_content=rule_md, ai_content="",
-                final_content=rule_md, prompt=prompt,
-                context_json=context_json, content_hash=content_hash,
-                model="rule-based", candidate_count=len(items),
-                high_risk_count=len(items),
+                session, report_id, rule_content=rule_md, ai_content="",
+                final_content=rule_md, prompt=prompt, context_json=context_json,
+                content_hash=content_hash, model="rule-based",
+                candidate_count=len(items), high_risk_count=len(items),
                 new_high_risk_count=new_count, status="ready_rule",
             )
             repo.add_personal_library_report_entry(session, report_id, "AI推送：最新高危漏洞简报")
