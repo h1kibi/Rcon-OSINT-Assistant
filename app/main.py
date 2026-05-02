@@ -442,15 +442,30 @@ def main():
     sync_signals.sync_done.connect(main_window.load_data)
     sync_signals.sync_done.connect(update_badge)
 
+    # Lock guards: sync execution vs collector replacement
+    sync_lock = threading.Lock()
+
+    def run_sync_locked():
+        with sync_lock:
+            _run_sync(get_settings(), get_collectors(), get_epss(), get_scorer())
+
     def sync_func():
         main_window.load_data()
         update_badge()
-        _run_sync_async(get_settings(), get_collectors(), get_epss(), get_scorer(), sync_signals)
+        def _worker():
+            try:
+                run_sync_locked()
+            finally:
+                sync_signals.sync_done.emit()
+        threading.Thread(target=_worker, daemon=True).start()
 
-    sync_scheduler = SyncScheduler(
-        lambda: _run_sync(get_settings(), get_collectors(), get_epss(), get_scorer()),
-        interval_minutes=get_settings().app.refresh_interval_minutes,
-    )
+    def sync_scheduler_recreate():
+        return SyncScheduler(
+            run_sync_locked,
+            interval_minutes=get_settings().app.refresh_interval_minutes,
+        )
+
+    sync_scheduler = sync_scheduler_recreate()
 
     # Connect config hot-reload
     def close_collectors(c, e):
@@ -475,15 +490,21 @@ def main():
             _scorer_ref[0] = build_scorer(new_config)
             _collectors_ref[0], _epss_ref[0] = build_collectors(new_config)
 
-            sync_scheduler.interval_minutes = new_config.app.refresh_interval_minutes
             floating_ball._min_score = new_config.ui.min_score_to_badge
 
-            # Handle scheduler start/stop based on collector state
+            # Handle scheduler lifecycle
             has_sources = bool(get_collectors())
             if has_sources and not sync_scheduler.is_running:
                 sync_scheduler.start(run_immediately=False)
+                logger.info("Scheduler auto-started from config hot-reload")
             elif not has_sources and sync_scheduler.is_running:
                 sync_scheduler.shutdown()
+                logger.info("Scheduler auto-stopped (no sources enabled)")
+            else:
+                sync_scheduler.update_interval(new_config.app.refresh_interval_minutes)
+
+        # Post-lock: force a sync so new collectors are tested immediately
+        QTimer.singleShot(1500, sync_func)
 
     main_window.config_changed.connect(on_config_changed)
 
@@ -503,9 +524,6 @@ def main():
     main_window.rescore_requested.connect(
         lambda: _rescore_all(get_settings(), get_scorer())
     )
-
-    # Sync lock: prevents collector replacement during active sync
-    sync_lock = threading.Lock()
 
     # Start scheduler if any collectors are enabled
     if get_collectors():

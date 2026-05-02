@@ -1,6 +1,7 @@
 from datetime import datetime
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.interval import IntervalTrigger
+from apscheduler.schedulers.base import SchedulerNotRunningError
 from loguru import logger
 
 
@@ -33,9 +34,7 @@ class SyncScheduler:
         )
         self.scheduler.start()
         self._is_running = True
-        logger.info(
-            f"Scheduler started (interval: {self.interval_minutes}min)"
-        )
+        logger.info(f"Scheduler started (interval: {self.interval_minutes}min)")
 
         if run_immediately:
             self.run_now()
@@ -65,7 +64,28 @@ class SyncScheduler:
         self._paused = False
         logger.info("Sync resumed")
 
+    def update_interval(self, interval_minutes: int):
+        """Update the scheduler interval in-place."""
+        self.interval_minutes = interval_minutes
+        if not self._is_running:
+            return
+        try:
+            self.scheduler.reschedule_job(
+                "sync_job",
+                trigger=IntervalTrigger(minutes=interval_minutes),
+            )
+            logger.info(f"Scheduler interval updated: {interval_minutes}min")
+        except Exception as e:
+            logger.warning(f"Failed to reschedule sync job: {e}")
+
     def shutdown(self):
-        self.scheduler.shutdown(wait=False)
-        self._is_running = False
+        """Idempotent shutdown, safe to call multiple times."""
+        if not self._is_running:
+            return
+        try:
+            self.scheduler.shutdown(wait=False)
+        except SchedulerNotRunningError:
+            pass
+        finally:
+            self._is_running = False
         logger.info("Scheduler shut down")
