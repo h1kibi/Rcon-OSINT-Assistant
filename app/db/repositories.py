@@ -145,7 +145,6 @@ def get_vulnerabilities(
 
     # Sorting
     from sqlalchemy import case
-    from datetime import datetime as dt
 
     # ── Rankings (first-class ORDER BY keys, not mixed into score) ──
     ignored_rank = case(

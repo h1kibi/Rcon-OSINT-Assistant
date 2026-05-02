@@ -41,12 +41,15 @@ def run_migrations(session: Session):
     _ensure_schema_version(session)
     applied = _get_applied_versions(session)
 
-    # Only auto-migrate legacy state: if nothing is applied yet, run everything
-    if not applied:
+    if 1 not in applied:
         _migrate_v1(session)
         _mark_applied(session, 1)
-    else:
-        logger.info(f"Schema already at version(s): {sorted(applied)}")
+
+    if 2 not in applied:
+        _create_sort_indexes(session)
+        _mark_applied(session, 2)
+
+    logger.info(f"Schema at version(s): {sorted(applied)}")
 
 
 def _migrate_v1(session: Session):
