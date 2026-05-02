@@ -13,6 +13,7 @@ from app.services.ai_push_service import (
     build_ai_push_prompt,
     build_push_context_hash,
     check_output_guardrails,
+    SYSTEM_PROMPT,
 )
 from app.services.llm_client import call_chat_completion
 
@@ -32,7 +33,7 @@ class AIPushWorker(QThread):
         try:
             result = call_chat_completion(
                 self.agent_config,
-                system_prompt="你是专业漏洞情报分析员，只基于用户提供的数据生成推送，不编造信息。",
+                system_prompt=SYSTEM_PROMPT,
                 user_prompt=self.prompt,
             )
             self.response_ready.emit(result)

@@ -699,8 +699,9 @@ def count_unalerted_high_risk_candidates(
         .where(
             (Vulnerability.action_value_score >= min_score) |
             (Vulnerability.cvss_score >= 8.0) |
-            (Vulnerability.is_kev == True) |
-            (Vulnerability.epss_percentile >= 0.9)
+            (Vulnerability.is_kev == True) |  # noqa: E712
+            (Vulnerability.epss_percentile >= 0.9) |
+            (Vulnerability.has_poc_signal == True)  # noqa: E712
         )
     )
     if already_ids:
