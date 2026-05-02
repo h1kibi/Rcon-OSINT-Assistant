@@ -340,9 +340,20 @@ class PromptCard(QFrame):
         layout.setContentsMargins(18, 16, 18, 16)
         layout.setSpacing(8)
 
+        header = QHBoxLayout()
         head = QLabel(title)
         head.setObjectName("promptTitle")
-        layout.addWidget(head)
+        header.addWidget(head)
+        header.addStretch()
+
+        if badge:
+            badge_label = QLabel(badge)
+            badge_label.setObjectName("promptBadge")
+            badge_label.setAlignment(Qt.AlignCenter)
+            badge_label.setFixedSize(42, 22)
+            header.addWidget(badge_label)
+
+        layout.addLayout(header)
 
         body = QLabel(desc)
         body.setObjectName("promptDesc")
@@ -350,13 +361,6 @@ class PromptCard(QFrame):
         layout.addWidget(body)
 
         layout.addStretch(1)
-
-        if badge:
-            self._badge = QLabel(badge)
-            self._badge.setObjectName("promptBadge")
-            self._badge.setAlignment(Qt.AlignCenter)
-            self._badge.setFixedSize(36, 20)
-            layout.addWidget(self._badge, 0, Qt.AlignRight)
 
     def mousePressEvent(self, event):
         self.clicked.emit(self.prompt)
