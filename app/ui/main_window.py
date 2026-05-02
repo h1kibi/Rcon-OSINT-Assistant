@@ -279,7 +279,7 @@ class MainWindow(QMainWindow):
         lbl_sort.setStyleSheet("color:#d29922; font-weight:bold; font-size:11px;")
         row2.addWidget(lbl_sort)
         self.cb_sort = QComboBox()
-        self.cb_sort.addItems(["默认", "评分优先", "发布时间优先", "CVSS优先"])
+        self.cb_sort.addItems(["评分优先", "发布时间优先", "CVSS优先"])
         self.cb_sort.currentIndexChanged.connect(self._on_search)
         row2.addWidget(self.cb_sort)
 
@@ -521,8 +521,7 @@ class MainWindow(QMainWindow):
 
         sort_text = self.cb_sort.currentText()
         sort_map = {
-            "默认": "smart",
-            "评分优先": "score_desc",
+            "评分优先": "smart",
             "发布时间优先": "date_desc",
             "CVSS优先": "cvss_desc",
         }
